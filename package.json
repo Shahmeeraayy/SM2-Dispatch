@@ -1,0 +1,7 @@
+{
+  "name": "sm2-dispatch-vercel-root",
+  "private": true,
+  "scripts": {
+    "build": "npm --prefix app run build"
+  }
+}
