@@ -3,15 +3,16 @@ import { X, AlertTriangle, Eye } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { loadTechnicianDirectory } from '@/lib/technicians';
+import { useAuth } from '@/contexts/AuthContext';
 
 export function AdminPreviewBanner() {
     const navigate = useNavigate();
     const { techId } = useParams();
+    const { technicianAccounts } = useAuth();
 
     const technician = useMemo(
-        () => loadTechnicianDirectory().find((tech) => tech.id === techId),
-        [techId]
+        () => technicianAccounts.find((tech) => tech.id === techId),
+        [techId, technicianAccounts]
     );
     const techName = technician?.name || 'Unknown Technician';
 

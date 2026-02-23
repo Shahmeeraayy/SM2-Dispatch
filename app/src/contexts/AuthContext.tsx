@@ -3,14 +3,19 @@ import type { User, UserRole } from '@/types';
 import { currentUser, technicianUser } from '@/mock/data';
 import {
   approveAdminTechnicianSignupRequest,
+  clearStoredTechnicianToken,
   clearStoredAdminToken,
   createTechnicianSignupRequest,
+  fetchDevTechnicianToken,
+  fetchTechnicianMeProfile,
   fetchAdminTechnicianSignupRequests,
   fetchAdminTechnicians,
   fetchDevAdminToken,
   getStoredAdminToken,
+  getStoredTechnicianToken,
   rejectAdminTechnicianSignupRequest,
   setStoredAdminToken,
+  setStoredTechnicianToken,
   updateAdminTechnician,
 } from '@/lib/backend-api';
 
@@ -76,8 +81,10 @@ interface AuthContextType {
   isAdmin: boolean;
   isTechnician: boolean;
   hasBackendAdminToken: boolean;
+  hasBackendTechnicianToken: boolean;
   technicianAccounts: TechnicianAccountSummary[];
   pendingTechnicianRequests: TechnicianSignupRequestSummary[];
+  syncAdminData: () => Promise<void>;
   login: (email: string, password: string, role?: UserRole) => Promise<void>;
   requestTechnicianSignup: (input: TechnicianSignupInput) => Promise<void>;
   approveTechnicianSignupRequest: (requestId: string) => Promise<void>;
@@ -335,6 +342,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const token = window.localStorage.getItem('sm_dispatch_admin_access_token');
     return Boolean(token && token.trim());
   });
+  const [hasBackendTechnicianToken, setHasBackendTechnicianToken] = useState<boolean>(() => {
+    if (typeof window === 'undefined') {
+      return false;
+    }
+    const token = window.localStorage.getItem('sm_dispatch_technician_access_token');
+    return Boolean(token && token.trim());
+  });
 
   const refreshBackendAdminData = useCallback(async () => {
     const token = getStoredAdminToken();
@@ -404,11 +418,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [pendingTechnicianRequests]);
 
   useEffect(() => {
-    if (!hasBackendAdminToken) {
+    if (!hasBackendAdminToken || user?.role !== 'admin') {
       return;
     }
     void refreshBackendAdminData();
-  }, [hasBackendAdminToken, refreshBackendAdminData]);
+  }, [hasBackendAdminToken, refreshBackendAdminData, user?.role]);
 
   useEffect(() => {
     if (user?.role !== 'admin' || hasBackendAdminToken) {
@@ -416,7 +430,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     let cancelled = false;
-    (async () => {
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    const bootstrap = async () => {
       try {
         const tokenResponse = await fetchDevAdminToken();
         if (cancelled) {
@@ -426,14 +441,33 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setHasBackendAdminToken(true);
         await refreshBackendAdminData();
       } catch {
-        // Keep existing local behavior if backend token bootstrap fails.
+        if (!cancelled) {
+          retryTimer = setTimeout(() => {
+            void bootstrap();
+          }, 3000);
+        }
       }
-    })();
+    };
+
+    void bootstrap();
 
     return () => {
       cancelled = true;
+      if (retryTimer) {
+        clearTimeout(retryTimer);
+      }
     };
   }, [hasBackendAdminToken, refreshBackendAdminData, user]);
+
+  useEffect(() => {
+    if (user?.role !== 'technician') {
+      return;
+    }
+    if (hasBackendTechnicianToken) {
+      return;
+    }
+    setUser(null);
+  }, [hasBackendTechnicianToken, user?.role]);
 
   const login = useCallback(async (email: string, password: string, role: UserRole = 'admin') => {
     const normalizedEmail = normalizeEmail(email);
@@ -451,6 +485,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const tokenResponse = await fetchDevAdminToken();
       setStoredAdminToken(tokenResponse.access_token);
       setHasBackendAdminToken(true);
+      clearStoredTechnicianToken();
+      setHasBackendTechnicianToken(false);
       await refreshBackendAdminData();
 
       setUser({
@@ -461,35 +497,59 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    const account = technicianAccounts.find((item) => normalizeEmail(item.email) === normalizedEmail);
-    if (!account) {
-      const hasPendingRequest = pendingTechnicianRequests.some(
-        (request) => normalizeEmail(request.email) === normalizedEmail
-      );
-      if (hasPendingRequest) {
-        throw new Error('Your signup request is pending admin approval.');
-      }
-      throw new Error('Invalid technician credentials or account not found.');
+    try {
+      const tokenResponse = await fetchDevTechnicianToken({
+        email: normalizedEmail,
+        password: normalizedPassword,
+      });
+      setStoredTechnicianToken(tokenResponse.access_token);
+      setHasBackendTechnicianToken(true);
+
+      const backendProfile = await fetchTechnicianMeProfile(tokenResponse.access_token);
+      const nowIso = new Date().toISOString();
+      const backendAccount: TechnicianAccount = {
+        id: backendProfile.id,
+        name: backendProfile.full_name || backendProfile.name,
+        email: normalizeEmail(backendProfile.email),
+        phone: backendProfile.phone ?? undefined,
+        password: normalizedPassword,
+        avatar: backendProfile.profile_picture_url ?? technicianUser.avatar,
+        isActive: backendProfile.status === 'active',
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      };
+
+      setTechnicianAccounts((prev) => {
+        const existingIndex = prev.findIndex((item) => item.id === backendAccount.id);
+        if (existingIndex === -1) {
+          return [backendAccount, ...prev];
+        }
+        const next = [...prev];
+        next[existingIndex] = {
+          ...next[existingIndex],
+          ...backendAccount,
+          createdAt: next[existingIndex].createdAt,
+        };
+        return next;
+      });
+
+      setUser({
+        id: backendAccount.id,
+        name: backendAccount.name,
+        role: 'technician',
+        email: backendAccount.email,
+        phone: backendAccount.phone,
+        avatar: backendAccount.avatar,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      });
+      return;
+    } catch (error) {
+      setHasBackendTechnicianToken(false);
+      clearStoredTechnicianToken();
+      throw (error instanceof Error ? error : new Error('Technician login failed.'));
     }
-
-    if (!account.isActive) {
-      throw new Error('This technician account is deactivated. Contact an admin.');
-    }
-
-    if (!account.password || account.password !== normalizedPassword) {
-      throw new Error('Invalid technician credentials or account not found.');
-    }
-
-    const updatedAccount: TechnicianAccount = {
-      ...account,
-      updatedAt: new Date().toISOString(),
-    };
-
-    setTechnicianAccounts((prev) =>
-      prev.map((item) => (item.id === account.id ? updatedAccount : item))
-    );
-    setUser(toTechnicianUser(updatedAccount));
-  }, [pendingTechnicianRequests, refreshBackendAdminData, technicianAccounts]);
+  }, [refreshBackendAdminData]);
 
   const requestTechnicianSignup = useCallback(async (input: TechnicianSignupInput) => {
     const name = input.name.trim();
@@ -593,17 +653,37 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!existing) {
         throw new Error('Technician account not found.');
       }
-      if (normalizeEmail(input.email) !== normalizeEmail(existing.email)) {
-        throw new Error('Email changes are not supported by backend technician account API.');
-      }
-      if (input.password?.trim()) {
-        throw new Error('Password updates are not supported by backend technician account API yet.');
+      const name = input.name.trim();
+      const email = normalizeEmail(input.email);
+      const phone = input.phone?.trim();
+      const nextPassword = input.password?.trim();
+
+      if (!name || !email) {
+        throw new Error('Name and email are required.');
       }
 
       await updateAdminTechnician(token, id, {
-        name: input.name.trim(),
-        phone: input.phone?.trim() || undefined,
+        name,
+        email,
+        phone: phone || undefined,
+        password: nextPassword || undefined,
       });
+
+      setTechnicianAccounts((prev) =>
+        prev.map((item) => (
+          item.id === id
+            ? {
+              ...item,
+              name,
+              email,
+              phone,
+              password: nextPassword ? nextPassword : item.password,
+              updatedAt: new Date().toISOString(),
+            }
+            : item
+        ))
+      );
+
       await refreshBackendAdminData();
       return;
     }
@@ -691,11 +771,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const logout = useCallback(() => {
     setUser(null);
     clearStoredAdminToken();
+    clearStoredTechnicianToken();
     setHasBackendAdminToken(false);
+    setHasBackendTechnicianToken(false);
   }, []);
 
   const switchRole = useCallback((role: UserRole) => {
     if (role === 'admin') {
+      clearStoredTechnicianToken();
+      setHasBackendTechnicianToken(false);
       setUser({
         ...currentUser,
         email: ADMIN_EMAIL,
@@ -704,14 +788,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    const fallback = technicianAccounts.find((item) => item.isActive);
-    if (!fallback) {
-      setUser(null);
-      return;
-    }
+    setUser(null);
+  }, []);
 
-    setUser(toTechnicianUser(fallback));
-  }, [technicianAccounts]);
+  const syncAdminData = useCallback(async () => {
+    await refreshBackendAdminData();
+  }, [refreshBackendAdminData]);
 
   const value: AuthContextType = {
     user,
@@ -719,8 +801,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     isAdmin: user?.role === 'admin',
     isTechnician: user?.role === 'technician',
     hasBackendAdminToken,
+    hasBackendTechnicianToken,
     technicianAccounts: technicianAccounts.map(toTechnicianSummary),
     pendingTechnicianRequests: pendingTechnicianRequests.map(toSignupRequestSummary),
+    syncAdminData,
     login,
     requestTechnicianSignup,
     approveTechnicianSignupRequest,

@@ -87,6 +87,14 @@ function App() {
               </RequireRole>
             }
           />
+          <Route
+            path="/admin/tech-preview/:techId/profile/settings"
+            element={
+              <RequireRole role="admin">
+                <TechnicianPreview view="profile" />
+              </RequireRole>
+            }
+          />
           {/* Default preview route redirects to available jobs */}
           <Route
             path="/admin/tech-preview/:techId"
@@ -165,6 +173,14 @@ function App() {
           />
           <Route
             path="/tech/profile"
+            element={
+              <RequireRole role="technician">
+                <ProfilePage />
+              </RequireRole>
+            }
+          />
+          <Route
+            path="/tech/profile/settings"
             element={
               <RequireRole role="technician">
                 <ProfilePage />

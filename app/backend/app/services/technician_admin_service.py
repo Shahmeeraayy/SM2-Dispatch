@@ -91,19 +91,39 @@ class TechnicianAdminService:
         for technician in technicians:
             zones = [ZoneResponse(id=zone.id, name=zone.name) for zone in self.repo.list_technician_zones(technician.id)]
             skills = [SkillResponse(id=skill.id, name=skill.name) for skill in self.repo.list_technician_skills(technician.id)]
+            pending_email_change = self.repo.get_pending_email_change_request(technician.id)
+            schedule_rows = self.repo.list_weekly_schedule(technician.id)
+            working_days = (
+                [int(day) for day in technician.working_days]
+                if isinstance(technician.working_days, list)
+                else [row.day_of_week for row in schedule_rows if row.is_enabled]
+            )
+            start_time = technician.working_hours_start or next((row.start_time for row in schedule_rows if row.is_enabled), None)
+            end_time = technician.working_hours_end or next((row.end_time for row in schedule_rows if row.is_enabled), None)
 
             results.append(
                 TechnicianListItemResponse(
                     id=technician.id,
-                    name=technician.name,
+                    name=technician.full_name or technician.name,
+                    full_name=technician.full_name or technician.name,
                     email=technician.email,
                     phone=technician.phone,
+                    profile_picture_url=technician.profile_picture_url,
                     status=technician.status,
                     manual_availability=technician.manual_availability,
                     effective_availability=self.availability_service.compute_effective_availability(technician.id),
                     on_leave_now=self.availability_service.is_on_leave_now(technician.id),
                     current_shift_window=self.availability_service.current_shift_window(technician.id),
                     next_time_off_start=self.availability_service.next_time_off_start(technician.id),
+                    working_days=[int(day) for day in working_days],
+                    working_hours_start=start_time,
+                    working_hours_end=end_time,
+                    after_hours_enabled=bool(technician.after_hours_enabled),
+                    has_pending_email_change_request=pending_email_change is not None,
+                    pending_email_change_request_id=pending_email_change.id if pending_email_change else None,
+                    pending_email_change_requested_email=(
+                        pending_email_change.requested_email if pending_email_change else None
+                    ),
                     zones=zones,
                     skills=skills,
                     current_jobs_count=self.repo.get_current_jobs_count(technician.id),
@@ -117,18 +137,38 @@ class TechnicianAdminService:
 
         zones = [ZoneResponse(id=zone.id, name=zone.name) for zone in self.repo.list_technician_zones(technician_id)]
         skills = [SkillResponse(id=skill.id, name=skill.name) for skill in self.repo.list_technician_skills(technician_id)]
+        pending_email_change = self.repo.get_pending_email_change_request(technician_id)
+        schedule_rows = self.repo.list_weekly_schedule(technician_id)
+        working_days = (
+            [int(day) for day in technician.working_days]
+            if isinstance(technician.working_days, list)
+            else [row.day_of_week for row in schedule_rows if row.is_enabled]
+        )
+        start_time = technician.working_hours_start or next((row.start_time for row in schedule_rows if row.is_enabled), None)
+        end_time = technician.working_hours_end or next((row.end_time for row in schedule_rows if row.is_enabled), None)
 
         return TechnicianProfileResponse(
             id=technician.id,
-            name=technician.name,
+            name=technician.full_name or technician.name,
+            full_name=technician.full_name or technician.name,
             email=technician.email,
             phone=technician.phone,
+            profile_picture_url=technician.profile_picture_url,
             status=technician.status,
             manual_availability=technician.manual_availability,
             effective_availability=self.availability_service.compute_effective_availability(technician_id),
             on_leave_now=self.availability_service.is_on_leave_now(technician_id),
             current_shift_window=self.availability_service.current_shift_window(technician_id),
             next_time_off_start=self.availability_service.next_time_off_start(technician_id),
+            working_days=working_days,
+            working_hours_start=start_time,
+            working_hours_end=end_time,
+            after_hours_enabled=bool(technician.after_hours_enabled),
+            has_pending_email_change_request=pending_email_change is not None,
+            pending_email_change_request_id=pending_email_change.id if pending_email_change else None,
+            pending_email_change_requested_email=(
+                pending_email_change.requested_email if pending_email_change else None
+            ),
             zones=zones,
             skills=skills,
             weekly_schedule=self._build_weekly_schedule(technician_id),
@@ -146,6 +186,7 @@ class TechnicianAdminService:
                 name=payload.name,
                 email=normalized_email,
                 phone=payload.phone,
+                password=payload.password,
                 status=status_value,
                 manual_availability=payload.manual_availability,
             )
@@ -178,8 +219,18 @@ class TechnicianAdminService:
             return self.get_profile(technician_id)
         if "status" in update_fields and hasattr(update_fields["status"], "value"):
             update_fields["status"] = update_fields["status"].value
+        if "name" in update_fields:
+            update_fields["full_name"] = update_fields["name"]
 
-        self.repo.update_technician_fields(technician_id, update_fields)
+        try:
+            self.repo.update_technician_fields(technician_id, update_fields)
+        except IntegrityError as exc:
+            self.db.rollback()
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Technician email already exists") from exc
+
+        audit_changes = dict(update_fields)
+        if "password" in audit_changes:
+            audit_changes["password"] = "[redacted]"
         AuditService.log_event(
             self.db,
             actor_role=UserRole.ADMIN,
@@ -187,7 +238,7 @@ class TechnicianAdminService:
             action="admin.technician.updated",
             entity_type=AuditEntityType.TECHNICIAN.value,
             entity_id=technician_id,
-            metadata={"changes": update_fields},
+            metadata={"changes": audit_changes},
         )
         self.db.commit()
         return self.get_profile(technician_id)

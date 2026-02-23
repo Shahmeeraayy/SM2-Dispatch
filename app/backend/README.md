@@ -2,7 +2,7 @@
 
 ## Stack
 - **Framework**: FastAPI
-- **Database**: PostgreSQL
+- **Database**: SQLite (local development)
 - **ORM**: SQLAlchemy
 - **Validation**: Pydantic
 - **Architecture**: Clean Service-Repository Layer
@@ -41,6 +41,12 @@
 - `GET /technicians/eligible/{job_id}`: Fetch eligible technicians for a specific job.
 - `POST /technicians/{id}/accept/{job_id}`: Accept a job (Checks constraints).
 - `POST /technicians/{id}/reject/{job_id}`: Reject a job (Hides from future broadcasts).
+
+### Invoices
+- `POST /invoices`: Create invoice (QuickBooks-style payload, backend calculations).
+- `GET /invoices/{id}`: Fetch invoice.
+- `PUT /invoices/{id}`: Update invoice.
+- `DELETE /invoices/{id}`: Void invoice (soft cancel).
 
 ## Setup
 1. Configure environment variables (copy from `.env.example`):

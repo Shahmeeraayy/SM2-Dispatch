@@ -5,16 +5,21 @@ app/.vite/
 app/.cache/
 
 # Python / backend
-backend/.venv/
-backend/venv/
-backend/__pycache__/
-backend/**/*.pyc
+app/backend/.venv/
+app/backend/venv/
+app/backend/__pycache__/
+app/backend/**/*.pyc
+app/backend/**/__pycache__/
+app/backend/.pytest_cache/
 
 # IDE / OS
 .DS_Store
 Thumbs.db
 .vscode/
 .idea/
+
+# Local logs
+.run-logs/
 
 # Env files
 .env

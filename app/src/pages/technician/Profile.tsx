@@ -1,17 +1,68 @@
-import { Calendar, Clock, User, Briefcase, LogOut, Settings, Bell } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
+import {
+    ArrowLeft,
+    Bell,
+    Briefcase,
+    Calendar,
+    ChevronRight,
+    Clock,
+    LogOut,
+    Mail,
+    Plus,
+    Save,
+    Settings,
+    Trash2,
+    User,
+} from 'lucide-react';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Card } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Switch } from '@/components/ui/switch';
 import { useAuth } from '@/contexts/AuthContext';
+import {
+    fetchTechnicianEmailChangeRequests,
+    fetchTechnicianMeProfile,
+    getStoredTechnicianToken,
+    requestTechnicianEmailChange,
+    updateTechnicianMeAvailability,
+    updateTechnicianMeProfile,
+    type BackendEmailChangeRequest,
+    type BackendTechnicianProfile,
+} from '@/lib/backend-api';
 
-function BottomNav({ activeTab }: { activeTab: 'available' | 'my-jobs' | 'schedule' | 'profile' }) {
+const DAY_OPTIONS = [
+    { label: 'Mon', value: 0 },
+    { label: 'Tue', value: 1 },
+    { label: 'Wed', value: 2 },
+    { label: 'Thu', value: 3 },
+    { label: 'Fri', value: 4 },
+    { label: 'Sat', value: 5 },
+    { label: 'Sun', value: 6 },
+] as const;
+
+type OutOfOfficeRangeDraft = {
+    start_date: string;
+    end_date: string;
+    note?: string;
+};
+
+function BottomNav({
+    activeTab,
+    routeBase,
+}: {
+    activeTab: 'available' | 'my-jobs' | 'schedule' | 'profile';
+    routeBase: string;
+}) {
     const navigate = useNavigate();
-
     const tabs = [
-        { id: 'available', label: 'Available', icon: Briefcase, path: '/tech/available-jobs' },
-        { id: 'my-jobs', label: 'My Jobs', icon: Calendar, path: '/tech/my-jobs' },
-        { id: 'schedule', label: 'Schedule', icon: Clock, path: '/tech/schedule' },
-        { id: 'profile', label: 'Profile', icon: User, path: '/tech/profile' },
+        { id: 'available', label: 'Available', icon: Briefcase, path: `${routeBase}/available-jobs` },
+        { id: 'my-jobs', label: 'My Jobs', icon: Calendar, path: `${routeBase}/my-jobs` },
+        { id: 'schedule', label: 'Schedule', icon: Clock, path: `${routeBase}/schedule` },
+        { id: 'profile', label: 'Profile', icon: User, path: `${routeBase}/profile` },
     ] as const;
 
     return (
@@ -21,22 +72,19 @@ function BottomNav({ activeTab }: { activeTab: 'available' | 'my-jobs' | 'schedu
                     {tabs.map((tab) => {
                         const Icon = tab.icon;
                         const isActive = activeTab === tab.id;
-
                         return (
                             <button
                                 key={tab.id}
                                 onClick={() => navigate(tab.path)}
                                 className={cn(
-                                    "flex flex-col items-center justify-center gap-1 px-4 py-2.5 rounded-xl transition-all duration-200 flex-1",
+                                    'flex flex-col items-center justify-center gap-1 px-4 py-2.5 rounded-xl transition-all duration-200 flex-1',
                                     isActive
-                                        ? "bg-[#2F8E92]/10 dark:bg-[#2F8E92]/20 text-[#2F8E92] dark:text-teal-400"
-                                        : "text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"
+                                        ? 'bg-[#2F8E92]/10 dark:bg-[#2F8E92]/20 text-[#2F8E92] dark:text-teal-400'
+                                        : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800',
                                 )}
                             >
-                                <Icon className={cn("w-5 h-5", isActive && "scale-110")} />
-                                <span className={cn("text-xs font-semibold", isActive && "font-bold")}>
-                                    {tab.label}
-                                </span>
+                                <Icon className={cn('w-5 h-5', isActive && 'scale-110')} />
+                                <span className={cn('text-xs font-semibold', isActive && 'font-bold')}>{tab.label}</span>
                             </button>
                         );
                     })}
@@ -46,18 +94,239 @@ function BottomNav({ activeTab }: { activeTab: 'available' | 'my-jobs' | 'schedu
     );
 }
 
+function emailRequestTone(status: BackendEmailChangeRequest['status']) {
+    if (status === 'PENDING') return 'bg-amber-100 text-amber-700 border-amber-200';
+    if (status === 'APPROVED') return 'bg-emerald-100 text-emerald-700 border-emerald-200';
+    return 'bg-red-100 text-red-700 border-red-200';
+}
+
+function hasOverlap(ranges: OutOfOfficeRangeDraft[]): boolean {
+    const normalized = ranges
+        .map((range) => ({
+            start: new Date(`${range.start_date}T00:00:00`).getTime(),
+            end: new Date(`${range.end_date}T23:59:59`).getTime(),
+        }))
+        .sort((a, b) => a.start - b.start);
+
+    for (let i = 1; i < normalized.length; i += 1) {
+        if (normalized[i].start <= normalized[i - 1].end) {
+            return true;
+        }
+    }
+    return false;
+}
+
 export default function ProfilePage() {
     const navigate = useNavigate();
-    const { user, logout } = useAuth();
+    const location = useLocation();
+    const { techId: previewTechId } = useParams();
+    const { user, logout, technicianAccounts } = useAuth();
+    const isPreviewMode = Boolean(previewTechId);
+    const routeBase = isPreviewMode ? `/admin/tech-preview/${previewTechId}` : '/tech';
+    const settingsRoute = `${routeBase}/profile/settings`;
+    const isSettingsView = location.pathname.endsWith('/profile/settings');
+    const previewTech = useMemo(() => {
+        if (!previewTechId) return null;
+        return technicianAccounts.find((tech) => tech.id === previewTechId) ?? null;
+    }, [previewTechId, technicianAccounts]);
+
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const [profile, setProfile] = useState<BackendTechnicianProfile | null>(null);
+    const [emailRequests, setEmailRequests] = useState<BackendEmailChangeRequest[]>([]);
+    const [fullName, setFullName] = useState('');
+    const [phone, setPhone] = useState('');
+    const [profilePictureUrl, setProfilePictureUrl] = useState('');
+    const [requestedEmail, setRequestedEmail] = useState('');
+    const [workingDays, setWorkingDays] = useState<number[]>([]);
+    const [workingHoursStart, setWorkingHoursStart] = useState('08:00');
+    const [workingHoursEnd, setWorkingHoursEnd] = useState('17:00');
+    const [afterHoursEnabled, setAfterHoursEnabled] = useState(false);
+    const [outOfOfficeRanges, setOutOfOfficeRanges] = useState<OutOfOfficeRangeDraft[]>([]);
+    const [newRange, setNewRange] = useState<OutOfOfficeRangeDraft>({ start_date: '', end_date: '', note: '' });
+    const [savingProfile, setSavingProfile] = useState(false);
+    const [savingAvailability, setSavingAvailability] = useState(false);
+    const [requestingEmailChange, setRequestingEmailChange] = useState(false);
+
+    const loadBackendData = async () => {
+        if (isPreviewMode) return;
+        const token = getStoredTechnicianToken();
+        if (!token) {
+            setError('Technician backend session missing. Please login again.');
+            setFullName(user?.name || '');
+            setPhone(user?.phone || '');
+            return;
+        }
+
+        setLoading(true);
+        setError(null);
+        try {
+            const [profilePayload, emailRequestPayload] = await Promise.all([
+                fetchTechnicianMeProfile(token),
+                fetchTechnicianEmailChangeRequests(token),
+            ]);
+            setProfile(profilePayload);
+            setEmailRequests(emailRequestPayload);
+            setFullName(profilePayload.full_name || profilePayload.name);
+            setPhone(profilePayload.phone || '');
+            setProfilePictureUrl(profilePayload.profile_picture_url || '');
+            setWorkingDays(profilePayload.working_days || []);
+            setWorkingHoursStart((profilePayload.working_hours_start || '08:00').slice(0, 5));
+            setWorkingHoursEnd((profilePayload.working_hours_end || '17:00').slice(0, 5));
+            setAfterHoursEnabled(Boolean(profilePayload.after_hours_enabled));
+            setOutOfOfficeRanges(
+                (profilePayload.upcoming_time_off || []).map((item) => ({
+                    start_date: item.start_date,
+                    end_date: item.end_date,
+                    note: item.reason || '',
+                })),
+            );
+        } catch (fetchError) {
+            setError(fetchError instanceof Error ? fetchError.message : 'Failed to load profile data.');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        void loadBackendData();
+    }, [isPreviewMode, user?.name, user?.phone]);
 
     const handleLogout = () => {
+        if (isPreviewMode) {
+            navigate('/admin', { replace: true });
+            return;
+        }
         logout();
         navigate('/tech/login', { replace: true });
     };
 
-    const userName = user?.name ?? 'Technician';
-    const userEmail = user?.email ?? 'technician@sm2dispatch.com';
-    const userPhone = user?.phone ?? '+1 (555) 000-0000';
+    const openSettingsView = () => {
+        navigate(settingsRoute);
+    };
+
+    const openProfileView = () => {
+        navigate(`${routeBase}/profile`);
+    };
+
+    const toggleWorkingDay = (day: number) => {
+        setWorkingDays((prev) => (
+            prev.includes(day) ? prev.filter((item) => item !== day) : [...prev, day].sort((a, b) => a - b)
+        ));
+    };
+
+    const addOutOfOfficeRange = () => {
+        if (!newRange.start_date || !newRange.end_date) {
+            window.alert('Start date and end date are required.');
+            return;
+        }
+        if (newRange.end_date < newRange.start_date) {
+            window.alert('End date must be on or after start date.');
+            return;
+        }
+        const next = [...outOfOfficeRanges, newRange];
+        if (hasOverlap(next)) {
+            window.alert('Out-of-office ranges cannot overlap.');
+            return;
+        }
+        setOutOfOfficeRanges(next);
+        setNewRange({ start_date: '', end_date: '', note: '' });
+    };
+
+    const saveProfile = async () => {
+        if (isPreviewMode) return;
+        const token = getStoredTechnicianToken();
+        if (!token) {
+            window.alert('Technician backend session missing. Please login again.');
+            return;
+        }
+        setSavingProfile(true);
+        try {
+            const updated = await updateTechnicianMeProfile(token, {
+                full_name: fullName,
+                phone: phone || null,
+                profile_picture_url: profilePictureUrl || null,
+            });
+            setProfile(updated);
+            window.alert('Profile updated successfully.');
+        } catch (saveError) {
+            window.alert(saveError instanceof Error ? saveError.message : 'Failed to update profile.');
+        } finally {
+            setSavingProfile(false);
+        }
+    };
+
+    const saveAvailability = async () => {
+        if (isPreviewMode) return;
+        if (workingDays.length === 0) {
+            window.alert('Select at least one working day.');
+            return;
+        }
+        if (workingHoursStart >= workingHoursEnd) {
+            window.alert('Working hours end time must be after start time.');
+            return;
+        }
+        if (hasOverlap(outOfOfficeRanges)) {
+            window.alert('Out-of-office ranges cannot overlap.');
+            return;
+        }
+        const token = getStoredTechnicianToken();
+        if (!token) {
+            window.alert('Technician backend session missing. Please login again.');
+            return;
+        }
+        setSavingAvailability(true);
+        try {
+            const updated = await updateTechnicianMeAvailability(token, {
+                working_days: workingDays,
+                working_hours_start: workingHoursStart,
+                working_hours_end: workingHoursEnd,
+                after_hours_enabled: afterHoursEnabled,
+                out_of_office_ranges: outOfOfficeRanges.map((item) => ({
+                    start_date: item.start_date,
+                    end_date: item.end_date,
+                    note: item.note?.trim() || undefined,
+                })),
+            });
+            setProfile(updated);
+            window.alert('Availability updated successfully.');
+        } catch (saveError) {
+            window.alert(saveError instanceof Error ? saveError.message : 'Failed to update availability.');
+        } finally {
+            setSavingAvailability(false);
+        }
+    };
+
+    const submitEmailChangeRequest = async () => {
+        if (isPreviewMode) return;
+        if (!requestedEmail.trim()) {
+            window.alert('Enter the new email address first.');
+            return;
+        }
+        const token = getStoredTechnicianToken();
+        if (!token) {
+            window.alert('Technician backend session missing. Please login again.');
+            return;
+        }
+        setRequestingEmailChange(true);
+        try {
+            await requestTechnicianEmailChange(token, { requested_email: requestedEmail.trim() });
+            setRequestedEmail('');
+            await loadBackendData();
+            window.alert('Email change request submitted.');
+        } catch (requestError) {
+            window.alert(requestError instanceof Error ? requestError.message : 'Failed to submit email change request.');
+        } finally {
+            setRequestingEmailChange(false);
+        }
+    };
+
+    const userName = isPreviewMode
+        ? (previewTech?.name ?? 'Preview Technician')
+        : (profile?.full_name || profile?.name || user?.name || 'Technician');
+    const userEmail = isPreviewMode
+        ? `${(previewTechId ?? 'tech').toLowerCase()}@preview.local`
+        : (profile?.email || user?.email || 'technician@sm2dispatch.com');
     const initials = userName
         .split(' ')
         .filter(Boolean)
@@ -65,81 +334,257 @@ export default function ProfilePage() {
         .join('')
         .slice(0, 2)
         .toUpperCase();
+    const statusLabel = isPreviewMode ? 'Preview' : ((profile?.status || 'active').toString());
+    const userPhone = phone || user?.phone || 'Not set';
 
     return (
         <div className="min-h-screen bg-gray-50 dark:bg-gray-950 pb-24">
-            {/* Top Navigation Bar */}
             <div className="sticky top-0 z-40 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 shadow-sm">
                 <div className="max-w-2xl mx-auto px-5 py-4">
                     <h1 className="text-xl font-bold text-gray-900 dark:text-white tracking-tight">
-                        Profile
+                        {isSettingsView ? 'Profile Settings' : 'Profile'}
                     </h1>
                     <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                        Manage your account
+                        {isSettingsView ? 'Manage your account and availability settings' : 'Manage your account'}
                     </p>
                 </div>
             </div>
 
-            {/* Content */}
             <div className="max-w-2xl mx-auto px-4 py-5 space-y-4">
-                {/* Profile Card */}
-                <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-6">
-                    <div className="flex items-center gap-4 mb-6">
-                        <div className="w-16 h-16 rounded-full bg-[#2F8E92] flex items-center justify-center text-white text-2xl font-bold">
-                            {initials}
-                        </div>
-                        <div>
-                            <h2 className="text-lg font-bold text-gray-900 dark:text-white">
-                                {userName}
-                            </h2>
-                            <p className="text-sm text-gray-500 dark:text-gray-400">
-                                Technician
-                            </p>
-                        </div>
-                    </div>
+                {loading ? <Card className="p-6">Loading profile...</Card> : null}
+                {error ? <Card className="p-4 border-red-200 bg-red-50 text-red-700 text-sm">{error}</Card> : null}
 
-                    <div className="space-y-3">
-                        <div className="flex items-center justify-between py-3 border-b border-gray-100 dark:border-gray-700">
-                            <span className="text-sm text-gray-600 dark:text-gray-400">Email</span>
-                            <span className="text-sm font-medium text-gray-900 dark:text-white">{userEmail}</span>
-                        </div>
-                        <div className="flex items-center justify-between py-3 border-b border-gray-100 dark:border-gray-700">
-                            <span className="text-sm text-gray-600 dark:text-gray-400">Phone</span>
-                            <span className="text-sm font-medium text-gray-900 dark:text-white">{userPhone}</span>
-                        </div>
-                        <div className="flex items-center justify-between py-3">
-                            <span className="text-sm text-gray-600 dark:text-gray-400">Status</span>
-                            <span className="text-sm font-medium text-green-600 dark:text-green-400">Active</span>
-                        </div>
-                    </div>
-                </div>
+                {isSettingsView ? (
+                    <>
+                        <Button type="button" variant="ghost" onClick={openProfileView} className="justify-start px-1 text-gray-600">
+                            <ArrowLeft className="w-4 h-4 mr-2" /> Back to Profile
+                        </Button>
 
-                {/* Settings */}
-                <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+                        <Card className="p-6 border-gray-200">
+                            <div className="flex items-center gap-4 mb-6">
+                                {profilePictureUrl ? (
+                                    <img src={profilePictureUrl} alt="Profile" className="w-16 h-16 rounded-full object-cover border border-gray-200" />
+                                ) : (
+                                    <div className="w-16 h-16 rounded-full bg-[#2F8E92] flex items-center justify-center text-white text-2xl font-bold">
+                                        {initials}
+                                    </div>
+                                )}
+                                <div>
+                                    <h2 className="text-lg font-bold text-gray-900 dark:text-white">{userName}</h2>
+                                    <p className="text-sm text-gray-500 dark:text-gray-400">{isPreviewMode ? 'Technician (Preview)' : 'Technician'}</p>
+                                </div>
+                            </div>
 
-                    <button className="w-full flex items-center gap-3 px-5 py-4 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors border-b border-gray-100 dark:border-gray-700">
-                        <Bell className="w-5 h-5 text-gray-500 dark:text-gray-400" />
-                        <span className="text-sm font-medium text-gray-900 dark:text-white">Notifications</span>
-                    </button>
-                    <button className="w-full flex items-center gap-3 px-5 py-4 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
-                        <Settings className="w-5 h-5 text-gray-500 dark:text-gray-400" />
-                        <span className="text-sm font-medium text-gray-900 dark:text-white">Settings</span>
-                    </button>
-                </div>
+                            {!isPreviewMode ? (
+                                <div className="space-y-3">
+                                    <div className="space-y-1">
+                                        <Label>Full Name</Label>
+                                        <Input value={fullName} onChange={(event) => setFullName(event.target.value)} />
+                                    </div>
+                                    <div className="space-y-1">
+                                        <Label>Phone</Label>
+                                        <Input value={phone} onChange={(event) => setPhone(event.target.value)} />
+                                    </div>
+                                    <div className="space-y-1">
+                                        <Label>Profile Picture URL</Label>
+                                        <Input value={profilePictureUrl} onChange={(event) => setProfilePictureUrl(event.target.value)} />
+                                    </div>
+                                    <Button onClick={() => void saveProfile()} className="w-full bg-[#2F8E92] hover:bg-[#267276]" disabled={savingProfile}>
+                                        <Save className="w-4 h-4 mr-2" />
+                                        {savingProfile ? 'Saving...' : 'Save Profile'}
+                                    </Button>
+                                </div>
+                            ) : null}
+                        </Card>
 
-                {/* Logout */}
+                        <Card className="p-6 border-gray-200">
+                            <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                                <Mail className="w-4 h-4" /> Email Change Request
+                            </h3>
+                            <div className="text-sm text-gray-600 mb-3">Current Email: <span className="font-medium text-gray-900">{userEmail}</span></div>
+
+                            {!isPreviewMode ? (
+                                <div className="space-y-3">
+                                    <div className="flex gap-2">
+                                        <Input type="email" value={requestedEmail} onChange={(event) => setRequestedEmail(event.target.value)} placeholder="Enter new email address" />
+                                        <Button onClick={() => void submitEmailChangeRequest()} disabled={requestingEmailChange} className="bg-[#2F8E92] hover:bg-[#267276]">
+                                            {requestingEmailChange ? 'Submitting...' : 'Request'}
+                                        </Button>
+                                    </div>
+                                    <div className="space-y-2">
+                                        {emailRequests.length === 0 ? (
+                                            <div className="text-xs text-gray-500">No email change requests yet.</div>
+                                        ) : emailRequests.slice(0, 3).map((request) => (
+                                            <div key={request.id} className="flex items-center justify-between rounded-md border border-gray-200 px-3 py-2">
+                                                <div className="text-xs text-gray-700">
+                                                    {request.requested_email}
+                                                    <div className="text-gray-500">{new Date(request.requested_at).toLocaleString()}</div>
+                                                </div>
+                                                <Badge variant="outline" className={emailRequestTone(request.status)}>{request.status}</Badge>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            ) : null}
+                        </Card>
+
+                        <Card className="p-6 border-gray-200">
+                            <h3 className="text-sm font-semibold text-gray-900 mb-3">Availability Settings</h3>
+                            {!isPreviewMode ? (
+                                <div className="space-y-4">
+                                    <div>
+                                        <Label className="mb-2 block">Working Days</Label>
+                                        <div className="flex flex-wrap gap-2">
+                                            {DAY_OPTIONS.map((day) => {
+                                                const selected = workingDays.includes(day.value);
+                                                return (
+                                                    <button
+                                                        key={day.value}
+                                                        type="button"
+                                                        onClick={() => toggleWorkingDay(day.value)}
+                                                        className={cn(
+                                                            'h-9 px-3 rounded-lg border text-sm font-medium',
+                                                            selected
+                                                                ? 'bg-[#2F8E92]/10 border-[#2F8E92] text-[#2F8E92]'
+                                                                : 'bg-white border-gray-200 text-gray-600',
+                                                        )}
+                                                    >
+                                                        {day.label}
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div className="space-y-1">
+                                            <Label>Start Time</Label>
+                                            <Input type="time" value={workingHoursStart} onChange={(event) => setWorkingHoursStart(event.target.value)} />
+                                        </div>
+                                        <div className="space-y-1">
+                                            <Label>End Time</Label>
+                                            <Input type="time" value={workingHoursEnd} onChange={(event) => setWorkingHoursEnd(event.target.value)} />
+                                        </div>
+                                    </div>
+
+                                    <div className="flex items-center justify-between rounded-lg border border-gray-200 px-3 py-2">
+                                        <div>
+                                            <div className="text-sm font-medium text-gray-900">After-hours availability</div>
+                                            <div className="text-xs text-gray-500">Allow assignment requests after normal shift</div>
+                                        </div>
+                                        <Switch checked={afterHoursEnabled} onCheckedChange={setAfterHoursEnabled} />
+                                    </div>
+
+                                    <div className="space-y-2">
+                                        <Label>Out-of-office ranges</Label>
+                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                                            <Input type="date" value={newRange.start_date} onChange={(event) => setNewRange((prev) => ({ ...prev, start_date: event.target.value }))} />
+                                            <Input type="date" value={newRange.end_date} onChange={(event) => setNewRange((prev) => ({ ...prev, end_date: event.target.value }))} />
+                                            <Input value={newRange.note || ''} onChange={(event) => setNewRange((prev) => ({ ...prev, note: event.target.value }))} placeholder="Note (optional)" />
+                                        </div>
+                                        <Button type="button" variant="outline" onClick={addOutOfOfficeRange} className="w-full">
+                                            <Plus className="w-4 h-4 mr-2" /> Add Range
+                                        </Button>
+                                        <div className="space-y-2">
+                                            {outOfOfficeRanges.length === 0 ? (
+                                                <div className="text-xs text-gray-500">No out-of-office ranges configured.</div>
+                                            ) : outOfOfficeRanges.map((range, index) => (
+                                                <div key={`${range.start_date}-${range.end_date}-${index}`} className="flex items-center justify-between rounded-md border border-gray-200 px-3 py-2">
+                                                    <div className="text-xs">
+                                                        <div className="font-medium text-gray-800">{range.start_date} - {range.end_date}</div>
+                                                        <div className="text-gray-500">{range.note || 'Out of office'}</div>
+                                                    </div>
+                                                    <Button type="button" variant="ghost" size="icon" onClick={() => setOutOfOfficeRanges((prev) => prev.filter((_, i) => i !== index))}>
+                                                        <Trash2 className="w-4 h-4 text-red-500" />
+                                                    </Button>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    <Button onClick={() => void saveAvailability()} className="w-full bg-[#2F8E92] hover:bg-[#267276]" disabled={savingAvailability}>
+                                        <Save className="w-4 h-4 mr-2" />
+                                        {savingAvailability ? 'Saving...' : 'Save Availability'}
+                                    </Button>
+                                </div>
+                            ) : null}
+                        </Card>
+                    </>
+                ) : (
+                    <>
+                        <Card className="p-6 border-gray-200">
+                            <div className="flex items-center gap-4">
+                                {profilePictureUrl ? (
+                                    <img src={profilePictureUrl} alt="Profile" className="w-16 h-16 rounded-full object-cover border border-gray-200" />
+                                ) : (
+                                    <div className="w-16 h-16 rounded-full bg-[#2F8E92] flex items-center justify-center text-white text-2xl font-bold">
+                                        {initials}
+                                    </div>
+                                )}
+                                <div>
+                                    <h2 className="text-lg font-bold text-gray-900 dark:text-white">{userName}</h2>
+                                    <p className="text-sm text-gray-500 dark:text-gray-400">{isPreviewMode ? 'Technician (Preview)' : 'Technician'}</p>
+                                </div>
+                            </div>
+
+                            <div className="mt-6 divide-y divide-gray-100">
+                                <div className="flex items-center justify-between py-3 text-sm">
+                                    <span className="text-gray-500">Email</span>
+                                    <span className="font-medium text-gray-900">{userEmail}</span>
+                                </div>
+                                <div className="flex items-center justify-between py-3 text-sm">
+                                    <span className="text-gray-500">Phone</span>
+                                    <span className="font-medium text-gray-900">{userPhone}</span>
+                                </div>
+                                <div className="flex items-center justify-between py-3 text-sm">
+                                    <span className="text-gray-500">Status</span>
+                                    <span className={cn(
+                                        'font-medium',
+                                        statusLabel.toLowerCase() === 'active' ? 'text-emerald-600' : 'text-gray-600',
+                                    )}>
+                                        {statusLabel.charAt(0).toUpperCase() + statusLabel.slice(1)}
+                                    </span>
+                                </div>
+                            </div>
+                        </Card>
+
+                        <Card className="p-0 overflow-hidden border-gray-200">
+                            <button
+                                type="button"
+                                className="w-full flex items-center justify-between px-4 py-4 text-left hover:bg-gray-50"
+                            >
+                                <span className="flex items-center gap-2 text-sm font-medium text-gray-900">
+                                    <Bell className="w-4 h-4 text-gray-500" />
+                                    Notifications
+                                </span>
+                                <ChevronRight className="w-4 h-4 text-gray-400" />
+                            </button>
+                            <button
+                                type="button"
+                                className="w-full flex items-center justify-between px-4 py-4 text-left hover:bg-gray-50 border-t border-gray-100"
+                                onClick={openSettingsView}
+                            >
+                                <span className="flex items-center gap-2 text-sm font-medium text-gray-900">
+                                    <Settings className="w-4 h-4 text-gray-500" />
+                                    Settings
+                                </span>
+                                <ChevronRight className="w-4 h-4 text-gray-400" />
+                            </button>
+                        </Card>
+                    </>
+                )}
+
                 <Button
                     onClick={handleLogout}
                     variant="outline"
                     className="w-full h-12 text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/20 border-red-200 dark:border-red-800"
                 >
                     <LogOut className="w-5 h-5 mr-2" />
-                    Logout
+                    {isPreviewMode ? 'Exit Preview' : 'Logout'}
                 </Button>
             </div>
 
-            {/* Bottom Navigation */}
-            <BottomNav activeTab="profile" />
+            <BottomNav activeTab="profile" routeBase={routeBase} />
         </div>
     );
 }

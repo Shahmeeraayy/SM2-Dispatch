@@ -1,5 +1,6 @@
-from sqlalchemy import Boolean, CheckConstraint, Column, ForeignKey, Integer, Time, UniqueConstraint, text
-from sqlalchemy.dialects.postgresql import UUID
+from uuid import uuid4
+
+from sqlalchemy import Boolean, CheckConstraint, Column, ForeignKey, Integer, Time, UniqueConstraint, Uuid, text
 from sqlalchemy.orm import relationship
 
 from .base import Base
@@ -8,9 +9,9 @@ from .base import Base
 class WorkingHours(Base):
     __tablename__ = "technician_working_hours"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    id = Column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
     technician_id = Column(
-        UUID(as_uuid=True),
+        Uuid(as_uuid=True),
         ForeignKey("technicians.id", ondelete="CASCADE"),
         nullable=False,
     )

@@ -1,10 +1,17 @@
 from datetime import date, datetime, time
+from enum import Enum
 from typing import List, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, Field, validator
 
 from ..core.enums import TechnicianStatus, TimeOffEntryType
+
+
+class EmailChangeRequestStatus(str, Enum):
+    PENDING = "PENDING"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
 
 
 class ZoneResponse(BaseModel):
@@ -72,14 +79,23 @@ class TimeOffResponseItem(BaseModel):
 class TechnicianProfileResponse(BaseModel):
     id: UUID
     name: str
+    full_name: str
     email: str
     phone: Optional[str] = None
+    profile_picture_url: Optional[str] = None
     status: TechnicianStatus
     manual_availability: bool
     effective_availability: bool
     on_leave_now: bool
     current_shift_window: Optional[str] = None
     next_time_off_start: Optional[date] = None
+    working_days: List[int] = Field(default_factory=list)
+    working_hours_start: Optional[time] = None
+    working_hours_end: Optional[time] = None
+    after_hours_enabled: bool = False
+    has_pending_email_change_request: bool = False
+    pending_email_change_request_id: Optional[UUID] = None
+    pending_email_change_requested_email: Optional[str] = None
     zones: List[ZoneResponse]
     skills: List[SkillResponse]
     weekly_schedule: List[WeeklyScheduleResponseItem]
@@ -89,14 +105,23 @@ class TechnicianProfileResponse(BaseModel):
 class TechnicianListItemResponse(BaseModel):
     id: UUID
     name: str
+    full_name: str
     email: str
     phone: Optional[str] = None
+    profile_picture_url: Optional[str] = None
     status: TechnicianStatus
     manual_availability: bool
     effective_availability: bool
     on_leave_now: bool
     current_shift_window: Optional[str] = None
     next_time_off_start: Optional[date] = None
+    working_days: List[int] = Field(default_factory=list)
+    working_hours_start: Optional[time] = None
+    working_hours_end: Optional[time] = None
+    after_hours_enabled: bool = False
+    has_pending_email_change_request: bool = False
+    pending_email_change_request_id: Optional[UUID] = None
+    pending_email_change_requested_email: Optional[str] = None
     zones: List[ZoneResponse]
     skills: List[SkillResponse]
     current_jobs_count: int
@@ -104,7 +129,9 @@ class TechnicianListItemResponse(BaseModel):
 
 class TechnicianUpdateRequest(BaseModel):
     name: Optional[str] = None
+    email: Optional[str] = None
     phone: Optional[str] = None
+    password: Optional[str] = None
     status: Optional[TechnicianStatus] = None
     manual_availability: Optional[bool] = None
 
@@ -117,11 +144,37 @@ class TechnicianUpdateRequest(BaseModel):
             raise ValueError("name must not be empty")
         return normalized
 
+    @validator("email")
+    def validate_email(cls, email: Optional[str]):
+        if email is None:
+            return None
+        normalized = email.strip().lower()
+        if "@" not in normalized or normalized.startswith("@") or normalized.endswith("@"):
+            raise ValueError("email must be valid")
+        return normalized
+
+    @validator("phone")
+    def validate_phone(cls, phone: Optional[str]):
+        if phone is None:
+            return None
+        normalized = phone.strip()
+        return normalized or None
+
+    @validator("password")
+    def validate_password(cls, password: Optional[str]):
+        if password is None:
+            return None
+        normalized = password.strip()
+        if not normalized:
+            raise ValueError("password must not be empty")
+        return normalized
+
 
 class TechnicianCreateRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     email: str = Field(..., min_length=3, max_length=255)
     phone: Optional[str] = Field(default=None, max_length=50)
+    password: Optional[str] = Field(default=None, min_length=1, max_length=255)
     status: TechnicianStatus = TechnicianStatus.ACTIVE
     manual_availability: bool = True
 
@@ -145,6 +198,15 @@ class TechnicianCreateRequest(BaseModel):
             return None
         normalized = phone.strip()
         return normalized or None
+
+    @validator("password")
+    def validate_password_create(cls, password: Optional[str]):
+        if password is None:
+            return None
+        normalized = password.strip()
+        if not normalized:
+            raise ValueError("password must not be empty")
+        return normalized
 
 
 class TechnicianZoneAssignRequest(BaseModel):
@@ -195,6 +257,122 @@ class AdminTimeOffCreateRequest(BaseModel):
         if start_date and end_date < start_date:
             raise ValueError("end_date must be on or after start_date")
         return end_date
+
+
+class OutOfOfficeRangeInput(BaseModel):
+    start_date: date
+    end_date: date
+    note: Optional[str] = None
+
+    @validator("end_date")
+    def validate_date_window(cls, end_date: date, values):
+        start_date = values.get("start_date")
+        if start_date and end_date < start_date:
+            raise ValueError("end_date must be on or after start_date")
+        return end_date
+
+    @validator("note")
+    def validate_note(cls, note: Optional[str]):
+        if note is None:
+            return None
+        normalized = note.strip()
+        return normalized or None
+
+
+class TechnicianAvailabilityUpdateRequest(BaseModel):
+    working_days: List[int] = Field(..., min_items=1)
+    working_hours_start: time
+    working_hours_end: time
+    after_hours_enabled: bool = False
+    out_of_office_ranges: List[OutOfOfficeRangeInput] = Field(default_factory=list)
+
+    @validator("working_days")
+    def validate_working_days(cls, working_days: List[int]):
+        if len(set(working_days)) != len(working_days):
+            raise ValueError("working_days contains duplicates")
+        for day in working_days:
+            if day < 0 or day > 6:
+                raise ValueError("working_days values must be between 0 and 6")
+        return sorted(working_days)
+
+    @validator("working_hours_end")
+    def validate_working_window(cls, end_time: time, values):
+        start_time = values.get("working_hours_start")
+        if start_time is not None and end_time <= start_time:
+            raise ValueError("working_hours_end must be greater than working_hours_start")
+        return end_time
+
+    @validator("out_of_office_ranges")
+    def validate_out_of_office_ranges(cls, ranges: List[OutOfOfficeRangeInput]):
+        sorted_ranges = sorted(ranges, key=lambda item: (item.start_date, item.end_date))
+        for idx in range(1, len(sorted_ranges)):
+            previous = sorted_ranges[idx - 1]
+            current = sorted_ranges[idx]
+            if current.start_date <= previous.end_date:
+                raise ValueError("out_of_office_ranges cannot overlap")
+        return sorted_ranges
+
+
+class TechnicianProfileUpdateRequest(BaseModel):
+    full_name: str = Field(..., min_length=1, max_length=255)
+    phone: Optional[str] = Field(default=None, max_length=50)
+    profile_picture_url: Optional[str] = None
+
+    @validator("full_name")
+    def validate_full_name(cls, full_name: str):
+        normalized = full_name.strip()
+        if not normalized:
+            raise ValueError("full_name must not be empty")
+        return normalized
+
+    @validator("phone")
+    def validate_phone(cls, phone: Optional[str]):
+        if phone is None:
+            return None
+        normalized = phone.strip()
+        return normalized or None
+
+    @validator("profile_picture_url")
+    def validate_profile_picture_url(cls, profile_picture_url: Optional[str]):
+        if profile_picture_url is None:
+            return None
+        normalized = profile_picture_url.strip()
+        return normalized or None
+
+
+class EmailChangeRequestCreateRequest(BaseModel):
+    requested_email: str = Field(..., min_length=3, max_length=255)
+
+    @validator("requested_email")
+    def validate_requested_email(cls, requested_email: str):
+        normalized = requested_email.strip().lower()
+        if "@" not in normalized or normalized.startswith("@") or normalized.endswith("@"):
+            raise ValueError("requested_email must be valid")
+        return normalized
+
+
+class EmailChangeRequestReviewRequest(BaseModel):
+    remarks: Optional[str] = None
+
+    @validator("remarks")
+    def validate_remarks(cls, remarks: Optional[str]):
+        if remarks is None:
+            return None
+        normalized = remarks.strip()
+        return normalized or None
+
+
+class EmailChangeRequestResponse(BaseModel):
+    id: UUID
+    technician_id: UUID
+    technician_name: Optional[str] = None
+    current_email: str
+    requested_email: str
+    status: EmailChangeRequestStatus
+    requested_at: datetime
+    reviewed_by: Optional[UUID] = None
+    reviewed_at: Optional[datetime] = None
+    remarks: Optional[str] = None
 
 
 class AssignmentReadinessResponse(BaseModel):

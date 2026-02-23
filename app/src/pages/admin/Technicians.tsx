@@ -98,10 +98,14 @@ interface WorkingHours {
 interface Technician {
     id: string;
     name: string;
+    full_name?: string;
     tech_code: string; // Unique
     phone: string;
+    profile_picture_url?: string;
     status: 'active' | 'inactive';
     availability: 'available' | 'busy' | 'offline';
+    has_pending_email_change_request?: boolean;
+    pending_email_change_requested_email?: string;
     zones: string[];
     skills: string[];
     working_hours: WorkingHours[];
@@ -122,24 +126,12 @@ interface PersistedAuditEvent {
     severity: 'info' | 'warning' | 'critical';
 }
 
-const TECHS_STORAGE_KEY = 'sm_dispatch_technicians';
 const DEFAULT_ACCOUNT_ZONES = ['Unassigned'];
 const DEFAULT_ACCOUNT_SKILLS = ['General Service'];
 const DEFAULT_ACCOUNT_ACTIONS = ['view_profile', 'edit_tech', 'set_time_off', 'deactivate'];
 
-const loadTechniciansFromStorage = (): Technician[] | null => {
-    try {
-        const raw = localStorage.getItem(TECHS_STORAGE_KEY);
-        if (!raw) return null;
-        const parsed = JSON.parse(raw);
-        return Array.isArray(parsed) ? parsed as Technician[] : null;
-    } catch {
-        return null;
-    }
-};
-
-const persistTechniciansToStorage = (techs: Technician[]) => {
-    localStorage.setItem(TECHS_STORAGE_KEY, JSON.stringify(techs));
+const persistTechniciansToStorage = (_techs: Technician[]) => {
+    // Intentionally no-op: technician data is sourced from backend only.
 };
 
 const appendAuditLog = (
@@ -254,11 +246,15 @@ const mapBackendTechnician = (item: BackendTechnicianListItem, index: number): T
 
     return {
         id: item.id,
-        name: item.name,
+        name: item.full_name || item.name,
+        full_name: item.full_name || item.name,
         tech_code: `T-${String(index + 1).padStart(2, '0')}`,
         phone: formatPhoneForDisplay(item.phone ?? ''),
+        profile_picture_url: item.profile_picture_url ?? undefined,
         status: item.status === 'active' ? 'active' : 'inactive',
         availability,
+        has_pending_email_change_request: item.has_pending_email_change_request ?? false,
+        pending_email_change_requested_email: item.pending_email_change_requested_email ?? undefined,
         zones: item.zones.map((zone) => zone.name),
         skills: item.skills.map((skill) => skill.name),
         working_hours: getRealSchedule(),
@@ -268,69 +264,6 @@ const mapBackendTechnician = (item: BackendTechnicianListItem, index: number): T
         allowed_actions: [...DEFAULT_ACCOUNT_ACTIONS],
     };
 };
-
-export const MOCK_TECHS: Technician[] = [
-    {
-        id: 't1',
-        name: 'Jolianne',
-        tech_code: 'T-01',
-        phone: '418-896-1296',
-        status: 'active',
-        availability: 'available',
-        zones: ['Québec', 'Lévis', 'Donnacona', 'St-Raymond'],
-        skills: ['PPF'],
-        working_hours: getRealSchedule(),
-        time_off: [],
-        current_jobs_count: 0,
-        current_assignments: [],
-        allowed_actions: ['view_profile', 'edit_tech', 'set_time_off', 'deactivate']
-    },
-    {
-        id: 't2',
-        name: 'Victor',
-        tech_code: 'T-02',
-        phone: '',
-        status: 'active',
-        availability: 'available',
-        zones: ['Donnacona', 'St-Raymond', 'Québec', 'Lévis'],
-        skills: ['PPF', 'Window Tint'],
-        working_hours: getRealSchedule(),
-        time_off: [],
-        current_jobs_count: 0,
-        current_assignments: [],
-        allowed_actions: ['view_profile', 'edit_tech', 'set_time_off', 'deactivate']
-    },
-    {
-        id: 't3',
-        name: 'Maxime',
-        tech_code: 'T-03',
-        phone: '',
-        status: 'active',
-        availability: 'available',
-        zones: ['Donnacona', 'St-Raymond', 'Québec', 'Lévis'],
-        skills: ['PPF', 'Window Tint'],
-        working_hours: getRealSchedule(),
-        time_off: [],
-        current_jobs_count: 0,
-        current_assignments: [],
-        allowed_actions: ['view_profile', 'edit_tech', 'set_time_off', 'deactivate']
-    },
-    {
-        id: 't4',
-        name: 'Dany',
-        tech_code: 'T-04',
-        phone: '418-806-3649',
-        status: 'active',
-        availability: 'available',
-        zones: ['Québec'],
-        skills: ['Windshield replacement', 'Windshield repair', 'Remote starters', 'Vehicle tracking systems', 'Engine immobilizers'],
-        working_hours: getRealSchedule(),
-        time_off: [],
-        current_jobs_count: 0,
-        current_assignments: [],
-        allowed_actions: ['view_profile', 'edit_tech', 'set_time_off', 'deactivate']
-    }
-];
 
 // --- Components ---
 
@@ -374,6 +307,8 @@ export default function TechniciansPage() {
     const [loading, setLoading] = useState(true);
     const [searchQuery, setSearchQuery] = useState('');
     const [filterStatus, setFilterStatus] = useState<string>('all');
+    const [filterZone, setFilterZone] = useState<string>('all');
+    const [filterSkill, setFilterSkill] = useState<string>('all');
     const [isBackendSynced, setIsBackendSynced] = useState(false);
 
     // Drawers & Modals
@@ -407,19 +342,14 @@ export default function TechniciansPage() {
                 setLoading(false);
                 return;
             } catch {
-                // Fall through to local/mock source if backend call fails.
+                // Fall through to account snapshot source if backend call fails.
             }
         }
 
-        setTimeout(() => {
-            const stored = loadTechniciansFromStorage();
-            const source = stored ?? MOCK_TECHS;
-            const merged = mergeTechniciansWithAccounts(source, technicianAccounts);
-            setTechs(merged);
-            setIsBackendSynced(false);
-            persistTechniciansToStorage(merged);
-            setLoading(false);
-        }, 600);
+        const merged = mergeTechniciansWithAccounts([], technicianAccounts);
+        setTechs(merged);
+        setIsBackendSynced(false);
+        setLoading(false);
     };
 
     useEffect(() => {
@@ -435,10 +365,27 @@ export default function TechniciansPage() {
             if (JSON.stringify(merged) === JSON.stringify(prev)) {
                 return prev;
             }
-            persistTechniciansToStorage(merged);
             return merged;
         });
     }, [isBackendSynced, technicianAccounts]);
+
+    const zoneFilterOptions = Array.from(
+        new Set(
+            techs
+                .flatMap((tech) => tech.zones)
+                .map((zone) => zone.trim())
+                .filter((zone) => zone.length > 0),
+        ),
+    ).sort((a, b) => a.localeCompare(b));
+
+    const skillFilterOptions = Array.from(
+        new Set(
+            techs
+                .flatMap((tech) => tech.skills)
+                .map((skill) => skill.trim())
+                .filter((skill) => skill.length > 0),
+        ),
+    ).sort((a, b) => a.localeCompare(b));
 
     // Filter Logic
     const filteredTechs = techs.filter(tech => {
@@ -450,7 +397,13 @@ export default function TechniciansPage() {
             tech.phone.includes(searchQuery) ||
             (queryPhoneToken.length > 0 && getPhoneSearchToken(tech.phone).includes(queryPhoneToken));
         const matchesStatus = filterStatus === 'all' || tech.status === filterStatus;
-        return matchesSearch && matchesStatus;
+        const matchesZone =
+            filterZone === 'all' ||
+            tech.zones.some((zone) => zone.trim().toLowerCase() === filterZone.toLowerCase());
+        const matchesSkill =
+            filterSkill === 'all' ||
+            tech.skills.some((skill) => skill.trim().toLowerCase() === filterSkill.toLowerCase());
+        return matchesSearch && matchesStatus && matchesZone && matchesSkill;
     });
 
     // Handlers
@@ -973,18 +926,18 @@ export default function TechniciansPage() {
             {/* 2. Filter Bar */}
             <Card className="p-4 border-gray-200 shadow-sm space-y-4">
                 <div className="flex flex-col lg:flex-row gap-4 items-center">
-                    <div className="relative flex-1 w-full lg:w-auto min-w-[300px]">
+                    <div className="relative flex-1 w-full lg:w-auto min-w-0 lg:min-w-[300px]">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                         <Input
-                            placeholder="Search by name, tech code, or phone..."
+                            placeholder="Search by name, tech code, phone, zone, or skill..."
                             className="pl-9 bg-gray-50 border-gray-200 focus:bg-white transition-all"
                             value={searchQuery}
                             onChange={e => setSearchQuery(e.target.value)}
                         />
                     </div>
-                    <div className="flex items-center gap-2 w-full lg:w-auto overflow-x-auto">
+                    <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
                         <Select value={filterStatus} onValueChange={setFilterStatus}>
-                            <SelectTrigger className="w-[140px]">
+                            <SelectTrigger className="w-full sm:w-[140px]">
                                 <SelectValue placeholder="Status" />
                             </SelectTrigger>
                             <SelectContent>
@@ -994,14 +947,38 @@ export default function TechniciansPage() {
                             </SelectContent>
                         </Select>
 
-                        <Button variant="outline" className="border-dashed text-gray-600">
-                            <MapPin className="w-4 h-4 mr-2" />
-                            Zone
-                        </Button>
-                        <Button variant="outline" className="border-dashed text-gray-600">
-                            <Briefcase className="w-4 h-4 mr-2" />
-                            Skills
-                        </Button>
+                        <Select value={filterZone} onValueChange={setFilterZone}>
+                            <SelectTrigger className="w-full sm:w-[160px] border-dashed text-gray-600">
+                                <div className="flex items-center gap-2">
+                                    <MapPin className="w-4 h-4" />
+                                    <SelectValue placeholder="Zone" />
+                                </div>
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">Zone</SelectItem>
+                                {zoneFilterOptions.map((zone) => (
+                                    <SelectItem key={zone} value={zone}>
+                                        {zone}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                        <Select value={filterSkill} onValueChange={setFilterSkill}>
+                            <SelectTrigger className="w-full sm:w-[170px] border-dashed text-gray-600">
+                                <div className="flex items-center gap-2">
+                                    <Briefcase className="w-4 h-4" />
+                                    <SelectValue placeholder="Skills" />
+                                </div>
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">Skills</SelectItem>
+                                {skillFilterOptions.map((skill) => (
+                                    <SelectItem key={skill} value={skill}>
+                                        {skill}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
 
                         <div className="h-6 w-px bg-gray-200 mx-2" />
 
@@ -1030,7 +1007,7 @@ export default function TechniciansPage() {
                         </div>
                         <h3 className="text-lg font-semibold text-gray-900">No technicians found</h3>
                         <p className="text-sm mt-1">Try adjusting your filters or search query.</p>
-                        <Button variant="outline" className="mt-4" onClick={() => { setSearchQuery(''); setFilterStatus('all'); }}>Clear Filters</Button>
+                        <Button variant="outline" className="mt-4" onClick={() => { setSearchQuery(''); setFilterStatus('all'); setFilterZone('all'); setFilterSkill('all'); }}>Clear Filters</Button>
                     </div>
                 ) : (
                     <Table>
@@ -1054,7 +1031,19 @@ export default function TechniciansPage() {
                                     className="group hover:bg-gray-50 cursor-pointer transition-colors"
                                     onClick={() => handleOpenProfile(tech)}
                                 >
-                                    <TableCell className="pl-6 font-medium text-gray-900 group-hover:text-[#2F8E92]">{tech.name}</TableCell>
+                                    <TableCell className="pl-6">
+                                        <div className="flex flex-col gap-1">
+                                            <span className="font-medium text-gray-900 group-hover:text-[#2F8E92]">{tech.name}</span>
+                                            {tech.has_pending_email_change_request ? (
+                                                <Badge
+                                                    variant="outline"
+                                                    className="w-fit text-[10px] h-5 px-1.5 bg-amber-50 text-amber-700 border-amber-200"
+                                                >
+                                                    Pending Email Change
+                                                </Badge>
+                                            ) : null}
+                                        </div>
+                                    </TableCell>
                                     <TableCell className="font-mono text-xs text-gray-500">{tech.tech_code}</TableCell>
                                     <TableCell className="text-gray-500 text-sm">{formatPhoneForDisplay(tech.phone)}</TableCell>
                                     <TableCell>
@@ -1120,6 +1109,16 @@ export default function TechniciansPage() {
                                         <span>•</span>
                                         <span>{formatPhoneForDisplay(selectedTech.phone)}</span>
                                     </div>
+                                    {selectedTech.has_pending_email_change_request ? (
+                                        <div className="mt-2">
+                                            <Badge
+                                                variant="outline"
+                                                className="text-[10px] h-5 px-2 bg-amber-50 text-amber-700 border-amber-200"
+                                            >
+                                                Pending Email Change: {selectedTech.pending_email_change_requested_email || 'Review required'}
+                                            </Badge>
+                                        </div>
+                                    ) : null}
                                 </div>
 
                                 <div className="flex gap-2 flex-wrap justify-end">
@@ -1422,3 +1421,5 @@ export default function TechniciansPage() {
         </div>
     );
 }
+
+

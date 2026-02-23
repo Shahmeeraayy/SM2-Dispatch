@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Search,
   UserCog,
@@ -40,6 +40,13 @@ import {
 } from '@/components/ui/table';
 import { Label } from '@/components/ui/label';
 import { formatPhoneForDisplay, formatUsPhoneInput } from '@/lib/phone';
+import {
+  approveAdminEmailChangeRequest,
+  fetchAdminEmailChangeRequests,
+  getStoredAdminToken,
+  rejectAdminEmailChangeRequest,
+  type BackendEmailChangeRequest,
+} from '@/lib/backend-api';
 
 type EditFormState = {
   name: string;
@@ -61,6 +68,7 @@ export default function TechnicianAccountsPage() {
   const {
     technicianAccounts,
     pendingTechnicianRequests,
+    syncAdminData,
     updateTechnicianAccount,
     setTechnicianAccountActive,
     approveTechnicianSignupRequest,
@@ -77,6 +85,35 @@ export default function TechnicianAccountsPage() {
   });
   const [formError, setFormError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [emailChangeRequests, setEmailChangeRequests] = useState<BackendEmailChangeRequest[]>([]);
+  const [emailRequestsLoading, setEmailRequestsLoading] = useState(false);
+
+  const loadEmailChangeRequests = async () => {
+    const token = getStoredAdminToken();
+    if (!token) {
+      setEmailChangeRequests([]);
+      return;
+    }
+    setEmailRequestsLoading(true);
+    try {
+      const rows = await fetchAdminEmailChangeRequests(token, 'PENDING');
+      setEmailChangeRequests(rows);
+    } catch {
+      setEmailChangeRequests([]);
+    } finally {
+      setEmailRequestsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadEmailChangeRequests();
+  }, []);
+
+  useEffect(() => {
+    void syncAdminData().catch(() => {
+      // Keep currently cached data if backend sync fails temporarily.
+    });
+  }, [syncAdminData]);
 
   const activeCount = technicianAccounts.filter((item) => item.isActive).length;
   const pendingCount = pendingTechnicianRequests.length;
@@ -106,6 +143,18 @@ export default function TechnicianAccountsPage() {
       || (request.phone ?? '').toLowerCase().includes(query)
     );
   }, [pendingTechnicianRequests, searchQuery]);
+
+  const filteredEmailChangeRequests = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) {
+      return emailChangeRequests;
+    }
+    return emailChangeRequests.filter((request) =>
+      request.current_email.toLowerCase().includes(query)
+      || request.requested_email.toLowerCase().includes(query)
+      || (request.technician_name ?? '').toLowerCase().includes(query)
+    );
+  }, [emailChangeRequests, searchQuery]);
 
   const openEditDialog = (account: TechnicianAccountSummary) => {
     setSelectedAccount(account);
@@ -184,6 +233,40 @@ export default function TechnicianAccountsPage() {
     }
   };
 
+  const handleApproveEmailChangeRequest = async (request: BackendEmailChangeRequest) => {
+    if (!window.confirm(`Approve email change for ${request.technician_name ?? 'technician'}?`)) {
+      return;
+    }
+    const token = getStoredAdminToken();
+    if (!token) {
+      window.alert('Admin session missing. Please login again.');
+      return;
+    }
+    try {
+      await approveAdminEmailChangeRequest(token, request.id);
+      await loadEmailChangeRequests();
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'Unable to approve email change request.');
+    }
+  };
+
+  const handleRejectEmailChangeRequest = async (request: BackendEmailChangeRequest) => {
+    if (!window.confirm(`Reject email change for ${request.technician_name ?? 'technician'}?`)) {
+      return;
+    }
+    const token = getStoredAdminToken();
+    if (!token) {
+      window.alert('Admin session missing. Please login again.');
+      return;
+    }
+    try {
+      await rejectAdminEmailChangeRequest(token, request.id);
+      await loadEmailChangeRequests();
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'Unable to reject email change request.');
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
@@ -218,6 +301,78 @@ export default function TechnicianAccountsPage() {
             className="pl-9"
           />
         </div>
+      </Card>
+
+      <Card className="border-gray-200">
+        <div className="px-6 py-4 border-b border-gray-100 bg-blue-50/40">
+          <h2 className="text-base font-semibold text-gray-900 flex items-center gap-2">
+            <Mail className="w-4 h-4 text-blue-600" />
+            Pending Email Change Requests
+          </h2>
+          <p className="text-sm text-gray-600 mt-1">
+            Review technician email updates before applying to account login identity.
+          </p>
+        </div>
+        <Table>
+          <TableHeader className="bg-gray-50">
+            <TableRow>
+              <TableHead className="pl-6 w-[220px]">Technician</TableHead>
+              <TableHead className="w-[260px]">Current Email</TableHead>
+              <TableHead className="w-[260px]">Requested Email</TableHead>
+              <TableHead className="w-[220px]">Requested At</TableHead>
+              <TableHead className="text-right pr-6">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {emailRequestsLoading ? (
+              <TableRow>
+                <TableCell colSpan={5} className="h-24 text-center text-sm text-gray-500">
+                  Loading email change requests...
+                </TableCell>
+              </TableRow>
+            ) : filteredEmailChangeRequests.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={5} className="h-24 text-center text-sm text-gray-500">
+                  No pending email change requests.
+                </TableCell>
+              </TableRow>
+            ) : (
+              filteredEmailChangeRequests.map((request) => (
+                <TableRow key={request.id} className="hover:bg-[#f7faff]">
+                  <TableCell className="pl-6">
+                    <div>
+                      <p className="font-semibold text-gray-900">{request.technician_name ?? 'Technician'}</p>
+                      <p className="text-xs text-gray-500 font-mono">{request.technician_id}</p>
+                    </div>
+                  </TableCell>
+                  <TableCell className="text-sm text-gray-700">{request.current_email}</TableCell>
+                  <TableCell className="text-sm text-blue-700 font-medium">{request.requested_email}</TableCell>
+                  <TableCell className="text-sm text-gray-700">{formatDateTime(request.requested_at)}</TableCell>
+                  <TableCell className="pr-6">
+                    <div className="flex items-center justify-end gap-2">
+                      <Button
+                        size="sm"
+                        className="bg-emerald-600 hover:bg-emerald-700"
+                        onClick={() => void handleApproveEmailChangeRequest(request)}
+                      >
+                        <CheckCircle2 className="w-4 h-4 mr-1" />
+                        Approve
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        onClick={() => void handleRejectEmailChangeRequest(request)}
+                      >
+                        <XCircle className="w-4 h-4 mr-1" />
+                        Reject
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
       </Card>
 
       <Card className="border-gray-200">

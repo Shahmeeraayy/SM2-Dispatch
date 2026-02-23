@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
     Database,
     AlertCircle,
@@ -10,6 +10,7 @@ import {
     Monitor,
     Zap,
     Mail,
+    FileText,
     ListFilter,
     PlusCircle
 } from 'lucide-react';
@@ -55,6 +56,17 @@ import {
 } from "@/components/ui/table";
 import { cn } from '@/lib/utils';
 import { useTheme } from '@/components/theme-provider';
+import {
+    type InvoiceCompanyProfile,
+    loadInvoiceCompanyProfile,
+    saveInvoiceCompanyProfile,
+} from '@/lib/invoice-company';
+import {
+    fetchAdminInvoiceBrandingSettings,
+    getStoredAdminToken,
+    updateAdminInvoiceBrandingSettings,
+} from '@/lib/backend-api';
+import { useAuth } from '@/contexts/AuthContext';
 
 
 
@@ -120,12 +132,27 @@ function StatusBadge({ status }: { status: ConnectionStatus }) {
     );
 }
 
+const normalizeInvoiceCompanyProfile = (profile: InvoiceCompanyProfile): InvoiceCompanyProfile => ({
+    logo_url: profile.logo_url?.trim() || undefined,
+    name: profile.name.trim(),
+    street_address: profile.street_address.trim(),
+    city: profile.city.trim(),
+    state: profile.state.trim(),
+    zip_code: profile.zip_code.trim(),
+    phone: profile.phone.trim(),
+    email: profile.email.trim(),
+    website: profile.website.trim(),
+});
+
 
 
 export default function SettingsPage() {
+    const { hasBackendAdminToken } = useAuth();
     const [loading, setLoading] = useState(false);
     const [savedSettings, setSavedSettings] = useState<OperationalSettings>(MOCK_SETTINGS);
     const [settings, setSettings] = useState<OperationalSettings>(MOCK_SETTINGS);
+    const [savedInvoiceCompany, setSavedInvoiceCompany] = useState<InvoiceCompanyProfile>(() => loadInvoiceCompanyProfile());
+    const [invoiceCompany, setInvoiceCompany] = useState<InvoiceCompanyProfile>(() => loadInvoiceCompanyProfile());
     const [priorityRules, setPriorityRules] = useState<PriorityRule[]>(initialPriorityRules);
     const [isAddingRule, setIsAddingRule] = useState(false);
     const [newRule, setNewRule] = useState<Partial<PriorityRule>>({
@@ -154,18 +181,105 @@ export default function SettingsPage() {
         phoneNumber: '+1(555) ***-8821'
     });
 
-    const handleSaveSettings = () => {
+    useEffect(() => {
+        let cancelled = false;
+
+        const loadInvoiceBrandingSettings = async () => {
+            const localProfile = loadInvoiceCompanyProfile();
+            setSavedInvoiceCompany(localProfile);
+            setInvoiceCompany(localProfile);
+
+            const adminToken = getStoredAdminToken();
+            if (!hasBackendAdminToken || !adminToken) {
+                return;
+            }
+
+            try {
+                const backendProfileRaw = await fetchAdminInvoiceBrandingSettings(adminToken);
+                if (cancelled) {
+                    return;
+                }
+
+                const backendProfile = normalizeInvoiceCompanyProfile({
+                    logo_url: backendProfileRaw.logo_url ?? undefined,
+                    name: backendProfileRaw.name,
+                    street_address: backendProfileRaw.street_address,
+                    city: backendProfileRaw.city,
+                    state: backendProfileRaw.state,
+                    zip_code: backendProfileRaw.zip_code,
+                    phone: backendProfileRaw.phone,
+                    email: backendProfileRaw.email,
+                    website: backendProfileRaw.website,
+                });
+
+                setSavedInvoiceCompany(backendProfile);
+                setInvoiceCompany(backendProfile);
+                saveInvoiceCompanyProfile(backendProfile);
+            } catch {
+                // Keep local storage profile as fallback when backend is unavailable.
+            }
+        };
+
+        void loadInvoiceBrandingSettings();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [hasBackendAdminToken]);
+
+    const handleSaveSettings = async () => {
+        const normalizedCompanyProfile: InvoiceCompanyProfile = normalizeInvoiceCompanyProfile(invoiceCompany);
+
+        if (
+            !normalizedCompanyProfile.name ||
+            !normalizedCompanyProfile.street_address ||
+            !normalizedCompanyProfile.city ||
+            !normalizedCompanyProfile.state ||
+            !normalizedCompanyProfile.zip_code ||
+            !normalizedCompanyProfile.phone ||
+            !normalizedCompanyProfile.email ||
+            !normalizedCompanyProfile.website
+        ) {
+            alert("Please complete the full invoice company profile (all fields except logo are required).");
+            return;
+        }
+
         setLoading(true);
-        // Simulate API call
-        setTimeout(() => {
+        try {
+            const adminToken = getStoredAdminToken();
+            let nextCompanyProfile = normalizedCompanyProfile;
+
+            if (hasBackendAdminToken && adminToken) {
+                const backendSavedProfile = await updateAdminInvoiceBrandingSettings(adminToken, normalizedCompanyProfile);
+                nextCompanyProfile = normalizeInvoiceCompanyProfile({
+                    logo_url: backendSavedProfile.logo_url ?? undefined,
+                    name: backendSavedProfile.name,
+                    street_address: backendSavedProfile.street_address,
+                    city: backendSavedProfile.city,
+                    state: backendSavedProfile.state,
+                    zip_code: backendSavedProfile.zip_code,
+                    phone: backendSavedProfile.phone,
+                    email: backendSavedProfile.email,
+                    website: backendSavedProfile.website,
+                });
+            }
+
             setSavedSettings({ ...settings });
-            setLoading(false);
+            setSavedInvoiceCompany(nextCompanyProfile);
+            setInvoiceCompany(nextCompanyProfile);
+            saveInvoiceCompanyProfile(nextCompanyProfile);
             alert("Settings saved successfully.");
-        }, 800);
+        } catch (error) {
+            const detail = error instanceof Error ? error.message : "Unable to save settings.";
+            alert(`Failed to save invoice branding settings: ${detail}`);
+        } finally {
+            setLoading(false);
+        }
     };
 
     const handleCancelSettings = () => {
         setSettings({ ...savedSettings });
+        setInvoiceCompany({ ...savedInvoiceCompany });
     };
 
     const handleThemeChange = (newTheme: ThemeMode) => {
@@ -433,6 +547,103 @@ export default function SettingsPage() {
                                     })}
                                 </TableBody>
                             </Table>
+                        </div>
+                    </CardContent>
+                </Card>
+
+                <Card className="border-border shadow-sm bg-card">
+                    <CardHeader className="pb-4">
+                        <CardTitle className="text-base font-semibold flex items-center gap-2 text-foreground">
+                            <FileText className="w-4 h-4 text-[#2F8E92]" /> Invoice Branding
+                        </CardTitle>
+                        <CardDescription className="text-muted-foreground">
+                            Edit the full company profile shown on generated invoices and PDFs.
+                        </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                        <div className="grid sm:grid-cols-2 gap-6">
+                            <div className="space-y-2 sm:col-span-2">
+                                <Label htmlFor="invoice_company_logo_url" className="text-foreground">Logo URL (optional)</Label>
+                                <Input
+                                    id="invoice_company_logo_url"
+                                    value={invoiceCompany.logo_url ?? ''}
+                                    onChange={(e) => setInvoiceCompany({ ...invoiceCompany, logo_url: e.target.value })}
+                                    placeholder="https://example.com/logo.png"
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <Label htmlFor="invoice_company_name" className="text-foreground">Company Name</Label>
+                                <Input
+                                    id="invoice_company_name"
+                                    value={invoiceCompany.name}
+                                    onChange={(e) => setInvoiceCompany({ ...invoiceCompany, name: e.target.value })}
+                                    placeholder="SM2 Dispatch"
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <Label htmlFor="invoice_company_email" className="text-foreground">Billing Email</Label>
+                                <Input
+                                    id="invoice_company_email"
+                                    type="email"
+                                    value={invoiceCompany.email}
+                                    onChange={(e) => setInvoiceCompany({ ...invoiceCompany, email: e.target.value })}
+                                    placeholder="billing@sm2dispatch.com"
+                                />
+                            </div>
+                            <div className="space-y-2 sm:col-span-2">
+                                <Label htmlFor="invoice_company_street" className="text-foreground">Street Address</Label>
+                                <Input
+                                    id="invoice_company_street"
+                                    value={invoiceCompany.street_address}
+                                    onChange={(e) => setInvoiceCompany({ ...invoiceCompany, street_address: e.target.value })}
+                                    placeholder="123 Dispatch Ave"
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <Label htmlFor="invoice_company_city" className="text-foreground">City</Label>
+                                <Input
+                                    id="invoice_company_city"
+                                    value={invoiceCompany.city}
+                                    onChange={(e) => setInvoiceCompany({ ...invoiceCompany, city: e.target.value })}
+                                    placeholder="Quebec"
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <Label htmlFor="invoice_company_state" className="text-foreground">State / Province</Label>
+                                <Input
+                                    id="invoice_company_state"
+                                    value={invoiceCompany.state}
+                                    onChange={(e) => setInvoiceCompany({ ...invoiceCompany, state: e.target.value })}
+                                    placeholder="QC"
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <Label htmlFor="invoice_company_zip" className="text-foreground">ZIP / Postal Code</Label>
+                                <Input
+                                    id="invoice_company_zip"
+                                    value={invoiceCompany.zip_code}
+                                    onChange={(e) => setInvoiceCompany({ ...invoiceCompany, zip_code: e.target.value })}
+                                    placeholder="G1A 1A1"
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <Label htmlFor="invoice_company_phone" className="text-foreground">Phone</Label>
+                                <Input
+                                    id="invoice_company_phone"
+                                    value={invoiceCompany.phone}
+                                    onChange={(e) => setInvoiceCompany({ ...invoiceCompany, phone: e.target.value })}
+                                    placeholder="+1-418-555-0100"
+                                />
+                            </div>
+                            <div className="space-y-2 sm:col-span-2">
+                                <Label htmlFor="invoice_company_website" className="text-foreground">Website</Label>
+                                <Input
+                                    id="invoice_company_website"
+                                    value={invoiceCompany.website}
+                                    onChange={(e) => setInvoiceCompany({ ...invoiceCompany, website: e.target.value })}
+                                    placeholder="https://www.sm2dispatch.com"
+                                />
+                            </div>
                         </div>
                     </CardContent>
                 </Card>

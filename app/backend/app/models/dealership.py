@@ -1,5 +1,6 @@
-from sqlalchemy import CheckConstraint, Column, DateTime, String, Text, text
-from sqlalchemy.dialects.postgresql import UUID
+from uuid import uuid4
+
+from sqlalchemy import CheckConstraint, Column, DateTime, String, Text, Uuid, text
 from sqlalchemy.sql import func
 
 from .base import Base
@@ -8,7 +9,7 @@ from .base import Base
 class Dealership(Base):
     __tablename__ = "dealerships"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    id = Column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
     code = Column(String(32), nullable=False, unique=True)
     name = Column(String(255), nullable=False)
     phone = Column(String(64), nullable=True)

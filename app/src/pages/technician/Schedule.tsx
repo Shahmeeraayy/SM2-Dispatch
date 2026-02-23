@@ -1,23 +1,23 @@
-import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import {
+    AlertCircle,
+    Briefcase,
+    Building2,
+    Calendar,
+    CalendarDays,
+    ChevronRight,
     Clock,
     MapPin,
-    Building2,
-    Briefcase,
-    AlertCircle,
-    Home,
-    ClipboardList,
-    CalendarDays,
-    User,
     RefreshCw,
-    ChevronRight
+    User,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { MOCK_SERVICES } from '../admin/Services';
 import { MOCK_DEALERSHIPS } from '../admin/Dealerships';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 
-// Types
 interface ScheduledJob {
     job_id: string;
     job_code: string;
@@ -25,66 +25,63 @@ interface ScheduledJob {
     service_name: string;
     status: 'scheduled' | 'in_progress' | 'delayed' | 'completed';
     urgency: 'critical' | 'high' | 'normal' | 'low' | null;
-    scheduled_start_dt: string | null; // ISO timestamp
-    scheduled_end_dt: string | null; // ISO timestamp
+    scheduled_start_dt: string | null;
+    scheduled_end_dt: string | null;
     zone: string | null;
 }
 
 interface DateGroup {
-    date: string; // YYYY-MM-DD
-    label: string; // "Today", "Tomorrow", "Wed, Feb 12"
+    date: string;
+    label: string;
     jobs: ScheduledJob[];
 }
 
-// Mock Data Generator
 const generateMockSchedule = (): ScheduledJob[] => {
     const today = new Date();
     const jobs: ScheduledJob[] = [];
-    const services = MOCK_SERVICES.map(s => s.name);
-    const dealers = MOCK_DEALERSHIPS.map(d => d.name);
-    const zones = ['Québec', 'Lévis', 'Donnacona', 'St-Raymond'];
+    const services = MOCK_SERVICES.map((s) => s.name);
+    const dealers = MOCK_DEALERSHIPS.map((d) => d.name);
+    const zones = ['Quebec', 'Levis', 'Donnacona', 'St-Raymond'];
 
-    const getRandom = (arr: any[]) => arr[Math.floor(Math.random() * arr.length)];
+    const getRandom = (arr: string[]) => arr[Math.floor(Math.random() * arr.length)];
 
-    // Today's jobs
     const todayDate = new Date(today);
     jobs.push(
         {
             job_id: 'job-sch-1',
             job_code: 'SM2-2024-1105',
             dealership_name: getRandom(dealers) || 'Audi de Quebec',
-            service_name: getRandom(services) || 'Bande pare-brise teintée',
+            service_name: getRandom(services) || 'Bande pare-brise teintee',
             status: 'scheduled',
             urgency: 'high',
             scheduled_start_dt: new Date(todayDate.setHours(9, 30, 0)).toISOString(),
             scheduled_end_dt: new Date(todayDate.setHours(10, 15, 0)).toISOString(),
-            zone: getRandom(zones)
+            zone: getRandom(zones),
         },
         {
             job_id: 'job-sch-2',
             job_code: 'SM2-2024-1106',
             dealership_name: getRandom(dealers) || 'Toyota Ste-Foy',
-            service_name: getRandom(services) || 'Démarreur 2-Way – Audi',
+            service_name: getRandom(services) || 'Demarreur 2-Way - Audi',
             status: 'scheduled',
             urgency: 'normal',
             scheduled_start_dt: new Date(todayDate.setHours(11, 0, 0)).toISOString(),
             scheduled_end_dt: new Date(todayDate.setHours(12, 0, 0)).toISOString(),
-            zone: getRandom(zones)
+            zone: getRandom(zones),
         },
         {
             job_id: 'job-sch-3',
             job_code: 'SM2-2024-1107',
             dealership_name: getRandom(dealers) || 'Honda Donnacona',
-            service_name: getRandom(services) || 'Main-d’œuvre – régulier',
+            service_name: getRandom(services) || 'Main-d-oeuvre - regulier',
             status: 'in_progress',
             urgency: 'critical',
             scheduled_start_dt: new Date(todayDate.setHours(14, 30, 0)).toISOString(),
             scheduled_end_dt: new Date(todayDate.setHours(15, 0, 0)).toISOString(),
-            zone: getRandom(zones)
-        }
+            zone: getRandom(zones),
+        },
     );
 
-    // Tomorrow's jobs
     const tomorrowDate = new Date(today);
     tomorrowDate.setDate(today.getDate() + 1);
     jobs.push(
@@ -97,22 +94,21 @@ const generateMockSchedule = (): ScheduledJob[] => {
             urgency: 'high',
             scheduled_start_dt: new Date(tomorrowDate.setHours(10, 0, 0)).toISOString(),
             scheduled_end_dt: new Date(tomorrowDate.setHours(11, 30, 0)).toISOString(),
-            zone: getRandom(zones)
+            zone: getRandom(zones),
         },
         {
             job_id: 'job-sch-5',
             job_code: 'SM2-2024-1109',
             dealership_name: getRandom(dealers) || 'Valley Motors',
-            service_name: getRandom(services) || 'Teintage complet – standard',
+            service_name: getRandom(services) || 'Teintage complet - standard',
             status: 'scheduled',
             urgency: null,
             scheduled_start_dt: new Date(tomorrowDate.setHours(13, 30, 0)).toISOString(),
             scheduled_end_dt: new Date(tomorrowDate.setHours(14, 0, 0)).toISOString(),
-            zone: getRandom(zones)
-        }
+            zone: getRandom(zones),
+        },
     );
 
-    // Day after tomorrow
     const dayAfterDate = new Date(today);
     dayAfterDate.setDate(today.getDate() + 2);
     jobs.push(
@@ -120,42 +116,41 @@ const generateMockSchedule = (): ScheduledJob[] => {
             job_id: 'job-sch-6',
             job_code: 'SM2-2024-1110',
             dealership_name: getRandom(dealers) || 'Audi de Quebec',
-            service_name: getRandom(services) || 'Bande pare-brise teintée',
+            service_name: getRandom(services) || 'Bande pare-brise teintee',
             status: 'scheduled',
             urgency: 'normal',
             scheduled_start_dt: new Date(dayAfterDate.setHours(9, 0, 0)).toISOString(),
             scheduled_end_dt: new Date(dayAfterDate.setHours(9, 45, 0)).toISOString(),
-            zone: getRandom(zones)
+            zone: getRandom(zones),
         },
         {
             job_id: 'job-sch-7',
             job_code: 'SM2-2024-1111',
             dealership_name: getRandom(dealers) || 'Toyota Ste-Foy',
-            service_name: getRandom(services) || 'Démarreur 2-Way – Audi',
+            service_name: getRandom(services) || 'Demarreur 2-Way - Audi',
             status: 'scheduled',
             urgency: null,
             scheduled_start_dt: new Date(dayAfterDate.setHours(15, 0, 0)).toISOString(),
             scheduled_end_dt: new Date(dayAfterDate.setHours(16, 0, 0)).toISOString(),
-            zone: getRandom(zones)
-        }
+            zone: getRandom(zones),
+        },
     );
 
-    // Add a few more future jobs
     for (let i = 3; i < 7; i++) {
         const futureDate = new Date(today);
         futureDate.setDate(today.getDate() + i);
 
-        if (i % 2 === 0) { // Some days have jobs, some don't
+        if (i % 2 === 0) {
             jobs.push({
                 job_id: `job-sch-${10 + i}`,
                 job_code: `SM2-2024-11${10 + i}`,
                 dealership_name: getRandom(dealers) || 'Honda Donnacona',
-                service_name: getRandom(services) || 'Main-d’œuvre – régulier',
+                service_name: getRandom(services) || 'Main-d-oeuvre - regulier',
                 status: 'scheduled',
                 urgency: 'normal',
                 scheduled_start_dt: new Date(futureDate.setHours(11, 0, 0)).toISOString(),
                 scheduled_end_dt: new Date(futureDate.setHours(12, 0, 0)).toISOString(),
-                zone: getRandom(zones)
+                zone: getRandom(zones),
             });
         }
     }
@@ -163,7 +158,181 @@ const generateMockSchedule = (): ScheduledJob[] => {
     return jobs;
 };
 
+function StatusBadge({ status }: { status: ScheduledJob['status'] }) {
+    const styles: Record<ScheduledJob['status'], string> = {
+        scheduled: 'bg-blue-100 text-blue-700 border-blue-300 dark:bg-blue-900/30 dark:text-blue-400 dark:border-blue-700',
+        in_progress: 'bg-emerald-100 text-emerald-700 border-emerald-300 dark:bg-emerald-900/30 dark:text-emerald-400 dark:border-emerald-700',
+        delayed: 'bg-orange-100 text-orange-700 border-orange-300 dark:bg-orange-900/30 dark:text-orange-400 dark:border-orange-700',
+        completed: 'bg-gray-100 text-gray-700 border-gray-300 dark:bg-gray-800 dark:text-gray-400 dark:border-gray-600',
+    };
+
+    const labels: Record<ScheduledJob['status'], string> = {
+        scheduled: 'Scheduled',
+        in_progress: 'In Progress',
+        delayed: 'Delayed',
+        completed: 'Completed',
+    };
+
+    return (
+        <Badge variant="outline" className={cn('font-semibold text-xs px-2.5 py-0.5 border', styles[status])}>
+            {labels[status]}
+        </Badge>
+    );
+}
+
+function UrgencyBadge({ urgency }: { urgency: ScheduledJob['urgency'] }) {
+    if (!urgency) return null;
+
+    const styles: Record<Exclude<ScheduledJob['urgency'], null>, string> = {
+        critical: 'bg-red-100 text-red-700 border-red-300 dark:bg-red-900/30 dark:text-red-400 dark:border-red-700',
+        high: 'bg-orange-100 text-orange-700 border-orange-300 dark:bg-orange-900/30 dark:text-orange-400 dark:border-orange-700',
+        normal: 'bg-blue-100 text-blue-700 border-blue-300 dark:bg-blue-900/30 dark:text-blue-400 dark:border-blue-700',
+        low: 'bg-gray-100 text-gray-700 border-gray-300 dark:bg-gray-800 dark:text-gray-400 dark:border-gray-600',
+    };
+
+    const labels: Record<Exclude<ScheduledJob['urgency'], null>, string> = {
+        critical: 'Critical',
+        high: 'High',
+        normal: 'Normal',
+        low: 'Low',
+    };
+
+    return (
+        <Badge
+            variant="outline"
+            className={cn(
+                'font-semibold text-xs px-2.5 py-0.5 border',
+                styles[urgency],
+                urgency === 'critical' && 'animate-pulse',
+            )}
+        >
+            {labels[urgency]}
+        </Badge>
+    );
+}
+
+function ScheduleJobCard({
+    job,
+    onOpen,
+}: {
+    job: ScheduledJob;
+    onOpen: (jobId: string) => void;
+}) {
+    const formatTime = (isoString: string | null) => {
+        if (!isoString) return 'Time TBD';
+        const date = new Date(isoString);
+        return date.toLocaleTimeString('en-US', {
+            hour: 'numeric',
+            minute: '2-digit',
+            hour12: true,
+        });
+    };
+
+    const formatTimeRange = (start: string | null, end: string | null) => {
+        if (!start) return 'Time TBD';
+        const startTime = formatTime(start);
+        const endTime = end ? formatTime(end) : null;
+        return endTime ? `${startTime} - ${endTime}` : startTime;
+    };
+
+    return (
+        <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
+            <div className="p-5 space-y-3">
+                <div className="flex items-start justify-between gap-3">
+                    <div>
+                        <h3 className="text-lg font-bold text-gray-900 dark:text-white tracking-tight">{job.job_code}</h3>
+                        <p className="text-sm text-gray-600 dark:text-gray-400 font-medium mt-0.5">{job.service_name}</p>
+                    </div>
+                    <div className="flex flex-col items-end gap-1.5">
+                        <StatusBadge status={job.status} />
+                        <UrgencyBadge urgency={job.urgency} />
+                    </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                    <Building2 className="w-4 h-4 text-gray-400 dark:text-gray-500 flex-shrink-0" />
+                    <span className="text-base font-semibold text-gray-900 dark:text-gray-100">{job.dealership_name}</span>
+                </div>
+
+                <div className="flex items-center justify-between gap-2 text-sm">
+                    <div className="flex items-center gap-1.5 text-gray-600 dark:text-gray-400">
+                        <Clock className="w-4 h-4 text-[#2F8E92] dark:text-teal-400" />
+                        <span className="font-medium">{formatTimeRange(job.scheduled_start_dt, job.scheduled_end_dt)}</span>
+                    </div>
+                    {job.zone && (
+                        <div className="flex items-center gap-1.5 text-gray-600 dark:text-gray-400">
+                            <MapPin className="w-4 h-4 text-[#2F8E92] dark:text-teal-400" />
+                            <span className="font-medium">{job.zone}</span>
+                        </div>
+                    )}
+                </div>
+
+                <div className="pt-2">
+                    <Button
+                        onClick={() => onOpen(job.job_id)}
+                        className={cn(
+                            'w-full h-11 text-sm font-semibold rounded-xl',
+                            'bg-[#2F8E92] hover:bg-[#267276] text-white',
+                        )}
+                    >
+                        Open Job
+                        <ChevronRight className="w-4 h-4 ml-2" />
+                    </Button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function BottomNav({
+    activeTab,
+    routeBase,
+}: {
+    activeTab: 'available' | 'my-jobs' | 'schedule' | 'profile';
+    routeBase: string;
+}) {
+    const navigate = useNavigate();
+
+    const tabs = [
+        { id: 'available', label: 'Available', icon: Briefcase, path: `${routeBase}/available-jobs` },
+        { id: 'my-jobs', label: 'My Jobs', icon: Calendar, path: `${routeBase}/my-jobs` },
+        { id: 'schedule', label: 'Schedule', icon: Clock, path: `${routeBase}/schedule` },
+        { id: 'profile', label: 'Profile', icon: User, path: `${routeBase}/profile` },
+    ] as const;
+
+    return (
+        <div className="fixed bottom-0 left-0 right-0 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-800 shadow-2xl z-50 safe-area-bottom">
+            <div className="max-w-2xl mx-auto px-2 py-2">
+                <div className="flex items-center justify-around gap-1">
+                    {tabs.map((tab) => {
+                        const Icon = tab.icon;
+                        const isActive = activeTab === tab.id;
+
+                        return (
+                            <button
+                                key={tab.id}
+                                onClick={() => navigate(tab.path)}
+                                className={cn(
+                                    'flex flex-col items-center justify-center gap-1 px-4 py-2.5 rounded-xl transition-all duration-200 flex-1',
+                                    isActive
+                                        ? 'bg-[#2F8E92]/10 dark:bg-[#2F8E92]/20 text-[#2F8E92] dark:text-teal-400'
+                                        : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800',
+                                )}
+                            >
+                                <Icon className={cn('w-5 h-5', isActive && 'scale-110')} />
+                                <span className={cn('text-xs font-semibold', isActive && 'font-bold')}>{tab.label}</span>
+                            </button>
+                        );
+                    })}
+                </div>
+            </div>
+        </div>
+    );
+}
+
 export default function SchedulePage() {
+    const { techId: previewTechId } = useParams();
+    const routeBase = previewTechId ? `/admin/tech-preview/${previewTechId}` : '/tech';
     const navigate = useNavigate();
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(false);
@@ -172,16 +341,14 @@ export default function SchedulePage() {
 
     useEffect(() => {
         fetchSchedule();
-    }, []);
+    }, [previewTechId]);
 
     const fetchSchedule = async () => {
         setLoading(true);
         setError(false);
         try {
-            // Simulate API call
-            await new Promise(resolve => setTimeout(resolve, 800));
-            const mockData = generateMockSchedule();
-            setJobs(mockData);
+            await new Promise((resolve) => setTimeout(resolve, 800));
+            setJobs(generateMockSchedule());
             setLastUpdated(new Date());
         } catch (err) {
             console.error('Failed to fetch schedule:', err);
@@ -191,8 +358,7 @@ export default function SchedulePage() {
         }
     };
 
-    // Group jobs by date
-    const groupJobsByDate = (): DateGroup[] => {
+    const dateGroups = useMemo(() => {
         const groups: DateGroup[] = [];
         const today = new Date();
         today.setHours(0, 0, 0, 0);
@@ -202,7 +368,7 @@ export default function SchedulePage() {
 
         const dateMap = new Map<string, ScheduledJob[]>();
 
-        jobs.forEach(job => {
+        jobs.forEach((job) => {
             if (!job.scheduled_start_dt) return;
 
             const jobDate = new Date(job.scheduled_start_dt);
@@ -215,24 +381,22 @@ export default function SchedulePage() {
             dateMap.get(dateStr)!.push(job);
         });
 
-        // Sort and create groups
         const sortedDates = Array.from(dateMap.keys()).sort();
-
-        sortedDates.forEach(dateStr => {
+        sortedDates.forEach((dateStr) => {
             const jobDate = new Date(dateStr);
             jobDate.setHours(0, 0, 0, 0);
 
             let label: string;
             if (jobDate.getTime() === today.getTime()) {
-                label = 'TODAY';
+                label = 'Today';
             } else if (jobDate.getTime() === tomorrow.getTime()) {
-                label = 'TOMORROW';
+                label = 'Tomorrow';
             } else {
                 label = jobDate.toLocaleDateString('en-US', {
                     weekday: 'short',
                     month: 'short',
-                    day: 'numeric'
-                }).toUpperCase();
+                    day: 'numeric',
+                });
             }
 
             const dayJobs = dateMap.get(dateStr)!;
@@ -242,306 +406,109 @@ export default function SchedulePage() {
                 return timeA - timeB;
             });
 
-            groups.push({
-                date: dateStr,
-                label,
-                jobs: dayJobs
-            });
+            groups.push({ date: dateStr, label, jobs: dayJobs });
         });
 
         return groups;
+    }, [jobs]);
+
+    const handleJobOpen = () => {
+        navigate(`${routeBase}/my-jobs`);
     };
 
-    const dateGroups = groupJobsByDate();
-
-    const formatTime = (isoString: string | null) => {
-        if (!isoString) return 'Time TBD';
-        const date = new Date(isoString);
-        return date.toLocaleTimeString('en-US', {
-            hour: 'numeric',
-            minute: '2-digit',
-            hour12: true
-        });
-    };
-
-    const formatTimeRange = (start: string | null, end: string | null) => {
-        if (!start) return 'Time TBD';
-        const startTime = formatTime(start);
-        const endTime = end ? formatTime(end) : null;
-        return endTime ? `${startTime} - ${endTime}` : startTime;
-    };
-
-    const getStatusColor = (status: string) => {
-        switch (status) {
-            case 'in_progress': return 'bg-[#2F8E92] text-white';
-            case 'delayed': return 'bg-orange-500 text-white';
-            case 'scheduled': return 'bg-gray-500 dark:bg-gray-600 text-white';
-            case 'completed': return 'bg-green-600 text-white';
-            default: return 'bg-gray-500 text-white';
-        }
-    };
-
-    const getStatusLabel = (status: string) => {
-        switch (status) {
-            case 'in_progress': return 'In Progress';
-            case 'delayed': return 'Delayed';
-            case 'scheduled': return 'Scheduled';
-            case 'completed': return 'Completed';
-            default: return status;
-        }
-    };
-
-    const getUrgencyColor = (urgency: string | null) => {
-        if (!urgency) return null;
-        switch (urgency) {
-            case 'critical': return 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 border-red-200 dark:border-red-800';
-            case 'high': return 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 border-orange-200 dark:border-orange-800';
-            case 'normal': return 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-800';
-            case 'low': return 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 border-gray-200 dark:border-gray-700';
-            default: return null;
-        }
-    };
-
-    const handleJobClick = (jobId: string) => {
-        navigate('/tech/my-jobs');
-    };
-
-    // Loading State
-    if (loading) {
-        return (
-            <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex flex-col pb-20">
-                {/* Header Skeleton */}
-                <div className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 px-4 py-4 sticky top-0 z-10">
-                    <div className="flex items-center justify-between">
-                        <div className="h-7 bg-gray-200 dark:bg-gray-800 rounded w-32"></div>
-                        <div className="h-9 w-9 bg-gray-200 dark:bg-gray-800 rounded-lg"></div>
-                    </div>
-                </div>
-
-                {/* Content Skeleton */}
-                <div className="flex-1 p-4 space-y-4">
-                    {[1, 2, 3].map(i => (
-                        <div key={i} className="space-y-3">
-                            <div className="h-5 bg-gray-200 dark:bg-gray-800 rounded w-24"></div>
-                            <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-4 space-y-2">
-                                <div className="h-4 bg-gray-200 dark:bg-gray-800 rounded w-32"></div>
-                                <div className="h-5 bg-gray-200 dark:bg-gray-800 rounded w-40"></div>
-                                <div className="h-4 bg-gray-200 dark:bg-gray-800 rounded w-28"></div>
-                            </div>
-                        </div>
-                    ))}
-                </div>
-
-                <TechnicianBottomNav currentPage="schedule" />
-            </div>
-        );
-    }
+    const activeJobsCount = jobs.filter((job) => ['scheduled', 'in_progress', 'delayed'].includes(job.status)).length;
 
     return (
-        <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex flex-col pb-20">
-            {/* Header */}
-            <div className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 px-4 py-4 sticky top-0 z-10 shadow-sm">
-                <div className="flex items-center justify-between">
-                    <div>
-                        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Schedule</h1>
-                        {lastUpdated && (
+        <div className="min-h-screen bg-gray-50 dark:bg-gray-950 pb-24">
+            <div className="sticky top-0 z-40 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 shadow-sm">
+                <div className="max-w-2xl mx-auto px-5 py-4">
+                    <div className="flex items-center justify-between gap-3">
+                        <div>
+                            <h1 className="text-xl font-bold text-gray-900 dark:text-white tracking-tight">Schedule</h1>
                             <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                                Updated {lastUpdated.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                                {activeJobsCount} upcoming jobs
+                                {lastUpdated
+                                    ? ` • updated ${lastUpdated.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`
+                                    : ''}
                             </p>
-                        )}
+                        </div>
+                        <Button
+                            variant="outline"
+                            size="icon"
+                            onClick={fetchSchedule}
+                            className="rounded-xl shrink-0"
+                            aria-label="Refresh schedule"
+                        >
+                            <RefreshCw className={cn('w-4 h-4', loading && 'animate-spin')} />
+                        </Button>
                     </div>
-                    <button
-                        onClick={fetchSchedule}
-                        className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
-                        aria-label="Refresh schedule"
-                    >
-                        <RefreshCw className={cn("w-5 h-5 text-gray-500 dark:text-gray-400", loading && "animate-spin")} />
-                    </button>
                 </div>
             </div>
 
-            {/* Error Banner */}
             {error && (
-                <div className="bg-red-50 dark:bg-red-900/20 border-b border-red-200 dark:border-red-800 px-4 py-3">
-                    <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                            <AlertCircle className="w-5 h-5 text-red-600 dark:text-red-400" />
-                            <span className="text-sm font-medium text-red-800 dark:text-red-300">
-                                Could not load schedule.
-                            </span>
+                <div className="max-w-2xl mx-auto px-4 pt-4">
+                    <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl px-4 py-3">
+                        <div className="flex items-center justify-between gap-3">
+                            <div className="flex items-center gap-2">
+                                <AlertCircle className="w-5 h-5 text-red-600 dark:text-red-400" />
+                                <span className="text-sm font-medium text-red-800 dark:text-red-300">
+                                    Could not load schedule.
+                                </span>
+                            </div>
+                            <button
+                                onClick={fetchSchedule}
+                                className="text-sm font-semibold text-red-700 dark:text-red-400 hover:underline"
+                            >
+                                Retry
+                            </button>
                         </div>
-                        <button
-                            onClick={fetchSchedule}
-                            className="text-sm font-semibold text-red-700 dark:text-red-400 hover:underline"
-                        >
-                            Retry
-                        </button>
                     </div>
                 </div>
             )}
 
-            {/* Schedule Content - Agenda List */}
-            <div className="flex-1 overflow-y-auto">
-                {dateGroups.length === 0 ? (
-                    // Empty State
-                    <div className="flex flex-col items-center justify-center py-16 px-4">
-                        <div className="w-20 h-20 bg-gray-100 dark:bg-gray-800 rounded-full flex items-center justify-center mb-4">
+            <div className="max-w-2xl mx-auto px-4 py-5 space-y-6">
+                {loading ? (
+                    <div className="space-y-4">
+                        {Array.from({ length: 3 }).map((_, i) => (
+                            <div
+                                key={i}
+                                className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-5 animate-pulse"
+                            >
+                                <div className="h-6 bg-gray-200 dark:bg-gray-700 rounded w-1/3 mb-3"></div>
+                                <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-2/3 mb-4"></div>
+                                <div className="h-11 bg-gray-200 dark:bg-gray-700 rounded"></div>
+                            </div>
+                        ))}
+                    </div>
+                ) : dateGroups.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-20 px-6 text-center">
+                        <div className="w-20 h-20 bg-gray-100 dark:bg-gray-800 rounded-full flex items-center justify-center mb-5">
                             <CalendarDays className="w-10 h-10 text-gray-400 dark:text-gray-600" />
                         </div>
-                        <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
-                            No Scheduled Jobs
-                        </h3>
-                        <p className="text-sm text-gray-500 dark:text-gray-400 text-center max-w-xs">
-                            New assignments will appear here.
+                        <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">No Scheduled Jobs</h3>
+                        <p className="text-gray-500 dark:text-gray-400 max-w-sm leading-relaxed">
+                            New assignments will appear here once they are scheduled.
                         </p>
                     </div>
                 ) : (
-                    // Agenda Groups
-                    <div className="p-4 space-y-6">
+                    <>
                         {dateGroups.map((group) => (
                             <div key={group.date} className="space-y-3">
-                                {/* Date Header */}
-                                <h2 className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider px-1">
+                                <h2 className="text-sm font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider px-1">
                                     {group.label}
                                 </h2>
-
-                                {/* Jobs for this date */}
-                                <div className="space-y-2">
+                                <div className="space-y-3">
                                     {group.jobs.map((job) => (
-                                        <div
-                                            key={job.job_id}
-                                            onClick={() => handleJobClick(job.job_id)}
-                                            className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-4 hover:shadow-md transition-shadow cursor-pointer"
-                                        >
-                                            {/* Time Range & Status */}
-                                            <div className="flex items-center justify-between mb-3">
-                                                <div className="flex items-center gap-2">
-                                                    <Clock className="w-4 h-4 text-gray-400 dark:text-gray-600" />
-                                                    <span className="text-sm font-semibold text-gray-900 dark:text-white">
-                                                        {formatTimeRange(job.scheduled_start_dt, job.scheduled_end_dt)}
-                                                    </span>
-                                                </div>
-                                                <span className={cn("text-xs font-medium px-2 py-1 rounded-md", getStatusColor(job.status))}>
-                                                    {getStatusLabel(job.status)}
-                                                </span>
-                                            </div>
-
-                                            {/* Job Info */}
-                                            <div className="space-y-2">
-                                                {/* Job Code & Urgency */}
-                                                <div className="flex items-start justify-between gap-2">
-                                                    <div className="flex-1 min-w-0">
-                                                        <p className="text-base font-bold text-gray-900 dark:text-white truncate">
-                                                            {job.job_code}
-                                                        </p>
-                                                        <p className="text-sm text-gray-600 dark:text-gray-400 truncate">
-                                                            {job.service_name}
-                                                        </p>
-                                                    </div>
-                                                    {job.urgency && (
-                                                        <span className={cn(
-                                                            "text-xs font-semibold px-2 py-1 rounded-md border uppercase flex-shrink-0",
-                                                            getUrgencyColor(job.urgency)
-                                                        )}>
-                                                            {job.urgency}
-                                                        </span>
-                                                    )}
-                                                </div>
-
-                                                {/* Dealership */}
-                                                <div className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
-                                                    <Building2 className="w-4 h-4 text-gray-400 dark:text-gray-600 flex-shrink-0" />
-                                                    <span className="font-medium truncate">{job.dealership_name}</span>
-                                                </div>
-
-                                                {/* Zone */}
-                                                {job.zone && (
-                                                    <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
-                                                        <MapPin className="w-4 h-4 text-gray-400 dark:text-gray-600 flex-shrink-0" />
-                                                        <span className="truncate">{job.zone}</span>
-                                                    </div>
-                                                )}
-                                            </div>
-
-                                            {/* Action Button */}
-                                            <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-800">
-                                                <button
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        handleJobClick(job.job_id);
-                                                    }}
-                                                    className="w-full flex items-center justify-center gap-2 bg-[#2F8E92] hover:bg-[#267276] text-white font-semibold py-2.5 rounded-lg transition-colors"
-                                                >
-                                                    Open Job
-                                                    <ChevronRight className="w-4 h-4" />
-                                                </button>
-                                            </div>
-                                        </div>
+                                        <ScheduleJobCard key={job.job_id} job={job} onOpen={handleJobOpen} />
                                     ))}
                                 </div>
                             </div>
                         ))}
-                    </div>
+                    </>
                 )}
             </div>
 
-            {/* Bottom Navigation */}
-            <TechnicianBottomNav currentPage="schedule" />
+            <BottomNav activeTab="schedule" routeBase={routeBase} />
         </div>
-    );
-}
-
-// Bottom Navigation Component
-function TechnicianBottomNav({ currentPage }: { currentPage: 'available' | 'my-jobs' | 'schedule' | 'profile' }) {
-    const navigate = useNavigate();
-
-    const navItems = [
-        { id: 'available', label: 'Available', icon: Briefcase, path: '/tech/available-jobs' },
-        { id: 'my-jobs', label: 'My Jobs', icon: ClipboardList, path: '/tech/my-jobs' },
-        { id: 'schedule', label: 'Schedule', icon: CalendarDays, path: '/tech/schedule' },
-        { id: 'profile', label: 'Profile', icon: User, path: '/tech/profile' },
-    ];
-
-    return (
-        <nav className="fixed bottom-0 left-0 right-0 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-800 safe-area-inset-bottom z-50">
-            <div className="flex items-center justify-around px-2 py-2">
-                {navItems.map((item) => {
-                    const Icon = item.icon;
-                    const isActive = item.id === currentPage;
-
-                    return (
-                        <button
-                            key={item.id}
-                            onClick={() => navigate(item.path)}
-                            className={cn(
-                                "flex flex-col items-center justify-center gap-1 px-4 py-2 rounded-xl transition-all min-w-[70px]",
-                                isActive
-                                    ? "bg-[#2F8E92]/10 dark:bg-teal-900/30"
-                                    : "hover:bg-gray-100 dark:hover:bg-gray-800"
-                            )}
-                        >
-                            <Icon
-                                className={cn(
-                                    "w-6 h-6 transition-colors",
-                                    isActive
-                                        ? "text-[#2F8E92] dark:text-teal-400"
-                                        : "text-gray-500 dark:text-gray-400"
-                                )}
-                            />
-                            <span
-                                className={cn(
-                                    "text-xs font-medium transition-colors",
-                                    isActive
-                                        ? "text-[#2F8E92] dark:text-teal-400"
-                                        : "text-gray-600 dark:text-gray-400"
-                                )}
-                            >
-                                {item.label}
-                            </span>
-                        </button>
-                    );
-                })}
-            </div>
-        </nav>
     );
 }

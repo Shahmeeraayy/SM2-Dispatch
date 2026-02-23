@@ -18,7 +18,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Eye, AlertTriangle } from 'lucide-react';
-import { loadTechnicianDirectory } from '@/lib/technicians';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface TechnicianPreviewModalProps {
     open: boolean;
@@ -40,31 +40,24 @@ const getInitials = (name: string) =>
         .slice(0, 2)
         .toUpperCase();
 
-// Fallback technicians
-const DEFAULT_TECHNICIANS: PreviewTechnician[] = [
-    { id: 'tech-jolianne', name: 'Jolianne', avatar: 'JO' },
-    { id: 'tech-victor', name: 'Victor', avatar: 'VI' },
-    { id: 'tech-maxime', name: 'Maxime', avatar: 'MA' },
-    { id: 'tech-dany', name: 'Dany', avatar: 'DA' },
-];
-
 export function TechnicianPreviewModal({ open, onOpenChange }: TechnicianPreviewModalProps) {
-    const [technicians, setTechnicians] = useState<PreviewTechnician[]>(DEFAULT_TECHNICIANS);
+    const { technicianAccounts } = useAuth();
+    const [technicians, setTechnicians] = useState<PreviewTechnician[]>([]);
     const [selectedTechId, setSelectedTechId] = useState<string>('');
     const navigate = useNavigate();
 
     useEffect(() => {
         if (!open) return;
 
-        const mapped = loadTechnicianDirectory(DEFAULT_TECHNICIANS).map((tech) => ({
+        const mapped = technicianAccounts.map((tech) => ({
             id: tech.id,
             name: tech.name,
             avatar: getInitials(tech.name),
-            code: tech.techCode,
+            code: undefined,
         }));
 
-        setTechnicians(mapped.length > 0 ? mapped : DEFAULT_TECHNICIANS);
-    }, [open]);
+        setTechnicians(mapped);
+    }, [open, technicianAccounts]);
 
     useEffect(() => {
         if (!selectedTechId) return;

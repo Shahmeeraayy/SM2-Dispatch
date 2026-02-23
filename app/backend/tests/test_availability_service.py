@@ -1,7 +1,7 @@
 from datetime import time
 import unittest
 
-from backend.app.services.availability_service import (
+from app.services.availability_service import (
     AvailabilityInputs,
     compute_effective_availability_from_inputs,
 )

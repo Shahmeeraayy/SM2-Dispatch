@@ -2,12 +2,13 @@ from datetime import date, datetime
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 from uuid import UUID
 
-from sqlalchemy import and_, delete, func, insert, select, text, update
+from sqlalchemy import and_, delete, func, insert, inspect, select, text, update
 from sqlalchemy.orm import Session
 
 from ..models.job import Job
 from ..models.skill import Skill, technician_skills
 from ..models.technician import Technician
+from ..models.technician_email_change_request import TechnicianEmailChangeRequest
 from ..models.time_off import TimeOff
 from ..models.working_hours import WorkingHours
 from ..models.zone import Zone, technician_zones
@@ -25,8 +26,16 @@ class TechnicianRepository:
     def get_technician_by_id(self, technician_id: UUID) -> Optional[Technician]:
         return self.db.query(Technician).filter(Technician.id == technician_id).first()
 
+    def get_technician_by_email(self, email: str) -> Optional[Technician]:
+        return self.db.query(Technician).filter(func.lower(Technician.email) == email.lower()).first()
+
     def email_exists(self, email: str) -> bool:
-        return self.db.query(Technician.id).filter(Technician.email == email).first() is not None
+        return (
+            self.db.query(Technician.id)
+            .filter(func.lower(Technician.email) == email.lower())
+            .first()
+            is not None
+        )
 
     def create_technician(
         self,
@@ -34,13 +43,16 @@ class TechnicianRepository:
         name: str,
         email: str,
         phone: Optional[str],
+        password: Optional[str],
         status: str,
         manual_availability: bool,
     ) -> Technician:
         technician = Technician(
             name=name,
+            full_name=name,
             email=email,
             phone=phone,
+            password=password,
             status=status,
             manual_availability=manual_availability,
         )
@@ -308,6 +320,21 @@ class TechnicianRepository:
         )
         self.db.flush()
 
+    def replace_out_of_office_ranges(self, technician_id: UUID, items: Sequence[Dict[str, Any]]) -> List[TimeOff]:
+        self.db.query(TimeOff).filter(TimeOff.technician_id == technician_id).delete()
+        for item in items:
+            self.db.add(
+                TimeOff(
+                    technician_id=technician_id,
+                    entry_type=item["entry_type"],
+                    start_date=item["start_date"],
+                    end_date=item["end_date"],
+                    reason=item["reason"],
+                )
+            )
+        self.db.flush()
+        return self.list_non_cancelled_time_off(technician_id)
+
     def get_job_by_id(self, job_id: UUID) -> Optional[Job]:
         return self.db.query(Job).filter(Job.id == job_id).first()
 
@@ -355,18 +382,8 @@ class TechnicianRepository:
         )
 
     def notifications_table_exists(self) -> bool:
-        row = self.db.execute(
-            text(
-                """
-                SELECT EXISTS (
-                    SELECT 1
-                    FROM information_schema.tables
-                    WHERE table_schema = 'public' AND table_name = 'notifications'
-                )
-                """
-            )
-        ).first()
-        return bool(row and row[0])
+        bind = self.db.get_bind()
+        return bool(bind is not None and inspect(bind).has_table("notifications"))
 
     def create_admin_notification_if_supported(self, payload: Dict[str, Any]) -> None:
         if not self.notifications_table_exists():
@@ -377,7 +394,7 @@ class TechnicianRepository:
             text(
                 """
                 INSERT INTO notifications (recipient_role, message, metadata, created_at)
-                VALUES (:recipient_role, :message, CAST(:metadata AS jsonb), NOW())
+                VALUES (:recipient_role, :message, :metadata, CURRENT_TIMESTAMP)
                 """
             ),
             {
@@ -387,3 +404,52 @@ class TechnicianRepository:
             },
         )
         self.db.flush()
+
+    def list_email_change_requests(
+        self,
+        *,
+        technician_id: Optional[UUID] = None,
+        status: Optional[str] = None,
+    ) -> List[TechnicianEmailChangeRequest]:
+        query = self.db.query(TechnicianEmailChangeRequest)
+        if technician_id is not None:
+            query = query.filter(TechnicianEmailChangeRequest.technician_id == technician_id)
+        if status is not None:
+            query = query.filter(TechnicianEmailChangeRequest.status == status)
+        return query.order_by(TechnicianEmailChangeRequest.requested_at.desc()).all()
+
+    def get_email_change_request_by_id(self, request_id: UUID) -> Optional[TechnicianEmailChangeRequest]:
+        return (
+            self.db.query(TechnicianEmailChangeRequest)
+            .filter(TechnicianEmailChangeRequest.id == request_id)
+            .first()
+        )
+
+    def get_pending_email_change_request(self, technician_id: UUID) -> Optional[TechnicianEmailChangeRequest]:
+        return (
+            self.db.query(TechnicianEmailChangeRequest)
+            .filter(
+                TechnicianEmailChangeRequest.technician_id == technician_id,
+                TechnicianEmailChangeRequest.status == "PENDING",
+            )
+            .order_by(TechnicianEmailChangeRequest.requested_at.desc())
+            .first()
+        )
+
+    def create_email_change_request(
+        self,
+        *,
+        technician_id: UUID,
+        current_email: str,
+        requested_email: str,
+    ) -> TechnicianEmailChangeRequest:
+        row = TechnicianEmailChangeRequest(
+            technician_id=technician_id,
+            current_email=current_email,
+            requested_email=requested_email,
+            status="PENDING",
+        )
+        self.db.add(row)
+        self.db.flush()
+        self.db.refresh(row)
+        return row

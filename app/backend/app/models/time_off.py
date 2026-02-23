@@ -1,5 +1,6 @@
-from sqlalchemy import CheckConstraint, Column, Date, DateTime, ForeignKey, String, Text, text
-from sqlalchemy.dialects.postgresql import UUID
+from uuid import uuid4
+
+from sqlalchemy import CheckConstraint, Column, Date, DateTime, ForeignKey, String, Text, Uuid, text
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -9,9 +10,9 @@ from .base import Base
 class TimeOff(Base):
     __tablename__ = "technician_time_off"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    id = Column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
     technician_id = Column(
-        UUID(as_uuid=True),
+        Uuid(as_uuid=True),
         ForeignKey("technicians.id", ondelete="CASCADE"),
         nullable=False,
     )

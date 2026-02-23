@@ -636,7 +636,7 @@ const DEALERSHIP_EXPORT_COLUMNS = [
     'Phone',
     'Email',
     'Address',
-    'City',
+    'City/Ville',
     'Postal Code',
     'Status',
     'Notes',
@@ -667,6 +667,7 @@ export default function DealershipsPage() {
     const [loading, setLoading] = useState(true);
     const [searchQuery, setSearchQuery] = useState('');
     const [filterStatus, setFilterStatus] = useState<string>('all');
+    const [filterCity, setFilterCity] = useState<string>('all');
     const [isBackendSynced, setIsBackendSynced] = useState(false);
 
     // Drawers & Modals
@@ -680,6 +681,17 @@ export default function DealershipsPage() {
     const [addForm, setAddForm] = useState({ name: '', phone: '', email: '', address: '', city: '', postal_code: '', notes: '' });
     const [editForm, setEditForm] = useState<Dealership | null>(null);
 
+    const loadLocalFallback = () => {
+        const source = loadDealershipsFromStorage() ?? MOCK_DEALERSHIPS;
+        const normalized = source.map((dealership) => ({
+            ...dealership,
+            phone: formatPhoneForDisplay(dealership.phone),
+        }));
+        setDealerships(normalized);
+        setIsBackendSynced(false);
+        persistDealershipsToStorage(normalized);
+    };
+
     // Initial Fetch
     const fetchDealerships = async () => {
         setLoading(true);
@@ -688,8 +700,12 @@ export default function DealershipsPage() {
         if (hasBackendAdminToken && adminToken) {
             try {
                 const rows = await fetchAdminDealerships(adminToken);
-                setDealerships(rows.map(mapBackendDealership));
-                setIsBackendSynced(true);
+                if (rows.length > 0) {
+                    setDealerships(rows.map(mapBackendDealership));
+                    setIsBackendSynced(true);
+                } else {
+                    loadLocalFallback();
+                }
                 setLoading(false);
                 return;
             } catch {
@@ -698,14 +714,7 @@ export default function DealershipsPage() {
         }
 
         setTimeout(() => {
-            const source = loadDealershipsFromStorage() ?? MOCK_DEALERSHIPS;
-            const normalized = source.map((dealership) => ({
-                ...dealership,
-                phone: formatPhoneForDisplay(dealership.phone),
-            }));
-            setDealerships(normalized);
-            setIsBackendSynced(false);
-            persistDealershipsToStorage(normalized);
+            loadLocalFallback();
             setLoading(false);
         }, 600);
     };
@@ -713,6 +722,14 @@ export default function DealershipsPage() {
     useEffect(() => {
         void fetchDealerships();
     }, [hasBackendAdminToken]);
+
+    const cityFilterOptions = Array.from(
+        new Set(
+            dealerships
+                .map((d) => d.city.trim())
+                .filter((city) => city.length > 0),
+        ),
+    ).sort((a, b) => a.localeCompare(b));
 
     // Filter Logic
     const filteredDealerships = dealerships.filter(d => {
@@ -724,7 +741,8 @@ export default function DealershipsPage() {
             d.city.toLowerCase().includes(query) ||
             (queryPhoneToken.length > 0 && getPhoneSearchToken(d.phone).includes(queryPhoneToken));
         const matchesStatus = filterStatus === 'all' || d.status === filterStatus;
-        return matchesSearch && matchesStatus;
+        const matchesCity = filterCity === 'all' || d.city.trim().toLowerCase() === filterCity.toLowerCase();
+        return matchesSearch && matchesStatus && matchesCity;
     });
 
     // Handlers
@@ -919,7 +937,7 @@ export default function DealershipsPage() {
             Phone: formatPhoneForDisplay(d.phone),
             Email: d.email,
             Address: d.address,
-            City: d.city,
+            'City/Ville': d.city,
             'Postal Code': d.postal_code,
             Status: d.status,
             Notes: d.notes || ''
@@ -978,8 +996,8 @@ export default function DealershipsPage() {
                                 </div>
                                 <div className="grid grid-cols-2 gap-4">
                                     <div className="space-y-2">
-                                        <Label>City</Label>
-                                        <Input placeholder="e.g. Quebec City" value={addForm.city} onChange={e => setAddForm({ ...addForm, city: e.target.value })} />
+                                        <Label>City/Ville</Label>
+                                        <Input placeholder="e.g. Quebec" value={addForm.city} onChange={e => setAddForm({ ...addForm, city: e.target.value })} />
                                     </div>
                                     <div className="space-y-2">
                                         <Label>Postal Code (Code)</Label>
@@ -1007,18 +1025,18 @@ export default function DealershipsPage() {
             {/* 2. Filter Bar */}
             <Card className="p-4 border-gray-200 shadow-sm space-y-4">
                 <div className="flex flex-col lg:flex-row gap-4 items-center">
-                    <div className="relative flex-1 w-full lg:w-auto min-w-[300px]">
+                    <div className="relative flex-1 w-full lg:w-auto min-w-0 lg:min-w-[300px]">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                         <Input
-                            placeholder="Search by dealership name, phone, or city..."
+                            placeholder="Search by dealership name, phone, or city/ville..."
                             className="pl-9 bg-gray-50 border-gray-200 focus:bg-white transition-all"
                             value={searchQuery}
                             onChange={e => setSearchQuery(e.target.value)}
                         />
                     </div>
-                    <div className="flex items-center gap-2 w-full lg:w-auto overflow-x-auto">
+                    <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
                         <Select value={filterStatus} onValueChange={setFilterStatus}>
-                            <SelectTrigger className="w-[140px]">
+                            <SelectTrigger className="w-full sm:w-[140px]">
                                 <SelectValue placeholder="Status" />
                             </SelectTrigger>
                             <SelectContent>
@@ -1028,9 +1046,22 @@ export default function DealershipsPage() {
                             </SelectContent>
                         </Select>
 
-                        <Button variant="outline" className="border-dashed text-gray-600">
-                            <Building2 className="w-4 h-4 mr-2" /> City
-                        </Button>
+                        <Select value={filterCity} onValueChange={setFilterCity}>
+                            <SelectTrigger className="w-full sm:w-[180px] border-dashed text-gray-600">
+                                <div className="flex items-center gap-2">
+                                    <Building2 className="w-4 h-4" />
+                                    <SelectValue placeholder="City/Ville" />
+                                </div>
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">City/Ville</SelectItem>
+                                {cityFilterOptions.map((city) => (
+                                    <SelectItem key={city} value={city}>
+                                        {city}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
 
                         <div className="h-6 w-px bg-gray-200 mx-2" />
 
@@ -1059,7 +1090,7 @@ export default function DealershipsPage() {
                         </div>
                         <h3 className="text-lg font-semibold text-gray-900">No dealerships found</h3>
                         <p className="text-sm mt-1">Try adjusting your filters or search query.</p>
-                        <Button variant="outline" className="mt-4" onClick={() => { setSearchQuery(''); setFilterStatus('all'); }}>Clear Filters</Button>
+                        <Button variant="outline" className="mt-4" onClick={() => { setSearchQuery(''); setFilterStatus('all'); setFilterCity('all'); }}>Clear Filters</Button>
                     </div>
                 ) : (
                     <Table>
@@ -1146,7 +1177,7 @@ export default function DealershipsPage() {
                                         <StatusBadge status={selectedDealership.status} />
                                     </div>
                                     <div className="text-sm text-gray-500">
-                                        {selectedDealership.city || 'No city provided'}
+                                        {selectedDealership.city || 'No city/ville provided'}
                                     </div>
                                 </div>
                                 <Button variant={selectedDealership.status === 'active' ? "outline" : "default"} size="sm" onClick={handleToggleStatus}>
@@ -1191,7 +1222,7 @@ export default function DealershipsPage() {
                                                 <Input value={editForm.email} onChange={e => setEditForm({ ...editForm, email: e.target.value })} className="h-8" />
                                             </div>
                                             <div className="space-y-2">
-                                                <Label className="text-xs text-gray-500">City</Label>
+                                                <Label className="text-xs text-gray-500">City/Ville</Label>
                                                 <Input value={editForm.city} onChange={e => setEditForm({ ...editForm, city: e.target.value })} className="h-8" />
                                             </div>
                                             <div className="space-y-2">

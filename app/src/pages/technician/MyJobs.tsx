@@ -14,7 +14,7 @@ import {
     Loader2,
     X
 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { MOCK_SERVICES } from '../admin/Services';
 import { MOCK_DEALERSHIPS } from '../admin/Dealerships';
@@ -327,14 +327,20 @@ function JobCard({
     );
 }
 
-function BottomNav({ activeTab }: { activeTab: 'available' | 'my-jobs' | 'schedule' | 'profile' }) {
+function BottomNav({
+    activeTab,
+    routeBase,
+}: {
+    activeTab: 'available' | 'my-jobs' | 'schedule' | 'profile';
+    routeBase: string;
+}) {
     const navigate = useNavigate();
 
     const tabs = [
-        { id: 'available', label: 'Available', icon: Briefcase, path: '/tech/available-jobs' },
-        { id: 'my-jobs', label: 'My Jobs', icon: Calendar, path: '/tech/my-jobs' },
-        { id: 'schedule', label: 'Schedule', icon: Clock, path: '/tech/schedule' },
-        { id: 'profile', label: 'Profile', icon: User, path: '/tech/profile' },
+        { id: 'available', label: 'Available', icon: Briefcase, path: `${routeBase}/available-jobs` },
+        { id: 'my-jobs', label: 'My Jobs', icon: Calendar, path: `${routeBase}/my-jobs` },
+        { id: 'schedule', label: 'Schedule', icon: Clock, path: `${routeBase}/schedule` },
+        { id: 'profile', label: 'Profile', icon: User, path: `${routeBase}/profile` },
     ] as const;
 
     return (
@@ -372,6 +378,8 @@ function BottomNav({ activeTab }: { activeTab: 'available' | 'my-jobs' | 'schedu
 // --- Main Component ---
 
 export default function MyJobsPage() {
+    const { techId: previewTechId } = useParams();
+    const routeBase = previewTechId ? `/admin/tech-preview/${previewTechId}` : '/tech';
     const [jobs, setJobs] = useState<MyJob[]>([]);
     const [loading, setLoading] = useState(true);
     const [showCompleted, setShowCompleted] = useState(false);
@@ -396,7 +404,7 @@ export default function MyJobsPage() {
 
     useEffect(() => {
         fetchJobs();
-    }, []);
+    }, [previewTechId]);
 
     const fetchJobs = async () => {
         setLoading(true);
@@ -778,7 +786,7 @@ export default function MyJobsPage() {
             </Dialog>
 
             {/* Bottom Navigation */}
-            <BottomNav activeTab="my-jobs" />
+            <BottomNav activeTab="my-jobs" routeBase={routeBase} />
         </div>
     );
 }

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, Navigate } from 'react-router-dom';
 import { AdminPreviewBanner } from '@/components/AdminPreviewBanner';
-import { loadTechnicianDirectory } from '@/lib/technicians';
+import { useAuth } from '@/contexts/AuthContext';
 
 // Import Technician Pages
 import AvailableJobsPage from '@/pages/technician/AvailableJobs';
@@ -16,6 +16,7 @@ interface TechPreviewProps {
 export default function TechnicianPreview({ view }: TechPreviewProps) {
     const { techId } = useParams();
     const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
+    const { technicianAccounts } = useAuth();
 
     useEffect(() => {
         // In production: Check if user is actually an admin
@@ -29,12 +30,12 @@ export default function TechnicianPreview({ view }: TechPreviewProps) {
             // const exists = await api.technicians.exists(techId);
             // setIsAuthorized(isAdmin && exists);
 
-            const isValidTechnician = loadTechnicianDirectory().some((tech) => tech.id === techId);
+            const isValidTechnician = technicianAccounts.some((tech) => tech.id === techId);
             setIsAuthorized(Boolean(techId && isValidTechnician));
         };
 
         checkAuthorization();
-    }, [techId]);
+    }, [techId, technicianAccounts]);
 
     // Loading state
     if (isAuthorized === null) {

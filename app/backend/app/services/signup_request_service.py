@@ -74,6 +74,7 @@ class SignupRequestService:
             name=row.name,
             email=row.email.lower(),
             phone=row.phone,
+            password=row.password,
             status=TechnicianStatus.ACTIVE.value,
             manual_availability=True,
         )

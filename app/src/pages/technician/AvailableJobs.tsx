@@ -18,9 +18,9 @@ import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useNavigate, useParams } from 'react-router-dom';
+import { useAuth } from '@/contexts/AuthContext';
 import { MOCK_SERVICES } from '../admin/Services';
 import { MOCK_DEALERSHIPS } from '../admin/Dealerships';
-import { loadTechnicianDirectory } from '@/lib/technicians';
 
 // --- Types ---
 
@@ -315,14 +315,20 @@ function JobCard({
     );
 }
 
-function BottomNav({ activeTab }: { activeTab: 'available' | 'my-jobs' | 'schedule' | 'profile' }) {
+function BottomNav({
+    activeTab,
+    routeBase,
+}: {
+    activeTab: 'available' | 'my-jobs' | 'schedule' | 'profile';
+    routeBase: string;
+}) {
     const navigate = useNavigate();
 
     const tabs = [
-        { id: 'available', label: 'Available', icon: Briefcase, path: '/tech/available-jobs' },
-        { id: 'my-jobs', label: 'My Jobs', icon: Calendar, path: '/tech/my-jobs' },
-        { id: 'schedule', label: 'Schedule', icon: Clock, path: '/tech/schedule' },
-        { id: 'profile', label: 'Profile', icon: User, path: '/tech/profile' },
+        { id: 'available', label: 'Available', icon: Briefcase, path: `${routeBase}/available-jobs` },
+        { id: 'my-jobs', label: 'My Jobs', icon: Calendar, path: `${routeBase}/my-jobs` },
+        { id: 'schedule', label: 'Schedule', icon: Clock, path: `${routeBase}/schedule` },
+        { id: 'profile', label: 'Profile', icon: User, path: `${routeBase}/profile` },
     ] as const;
 
     return (
@@ -364,8 +370,17 @@ export default function AvailableJobsPage() {
     const [loading, setLoading] = useState(true);
     const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
     const { techId: previewTechId } = useParams();
+    const { user, technicianAccounts } = useAuth();
     const navigate = useNavigate();
-    const technicianDirectory = useMemo(() => loadTechnicianDirectory(), []);
+    const technicianDirectory = useMemo(
+        () => technicianAccounts.map((tech) => ({
+            id: tech.id,
+            name: tech.name,
+            techCode: tech.id.slice(0, 8).toUpperCase(),
+            status: tech.isActive ? 'active' : 'inactive',
+        })),
+        [technicianAccounts],
+    );
 
     const currentTech = useMemo(() => {
         if (previewTechId) {
@@ -374,13 +389,23 @@ export default function AvailableJobsPage() {
             return { id: previewTechId, name: 'Preview Technician', techCode: 'TECH-001', status: 'active' };
         }
 
+        if (user?.role === 'technician') {
+            return {
+                id: user.id,
+                name: user.name,
+                techCode: user.id.slice(0, 8).toUpperCase(),
+                status: 'active',
+            };
+        }
+
         return technicianDirectory[0] ?? { id: 'tech-001', name: 'Technician', techCode: 'TECH-001', status: 'active' };
-    }, [previewTechId, technicianDirectory]);
+    }, [previewTechId, technicianDirectory, user]);
 
     const currentTechId = currentTech.id;
     const currentTechCode = currentTech.techCode ?? currentTech.id;
     const isPreviewMode = Boolean(previewTechId);
-    const myJobsPath = isPreviewMode ? `/admin/tech-preview/${currentTechId}/my-jobs` : '/tech/my-jobs';
+    const routeBase = isPreviewMode ? `/admin/tech-preview/${currentTechId}` : '/tech';
+    const myJobsPath = `${routeBase}/my-jobs`;
 
     const isJobVisibleForTech = (job: AvailableJob, techId: string, rejections: JobRejectionRecord[]) => {
         const jobStatus = job.status ?? 'READY_FOR_TECH_ACCEPTANCE';
@@ -644,7 +669,7 @@ export default function AvailableJobsPage() {
             </div>
 
             {/* Bottom Navigation */}
-            <BottomNav activeTab="available" />
+            <BottomNav activeTab="available" routeBase={routeBase} />
         </div>
     );
 }

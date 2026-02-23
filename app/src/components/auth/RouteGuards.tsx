@@ -13,7 +13,7 @@ function loginPathForRole(role: UserRole) {
 }
 
 export function RequireRole({ role, children }: { role: UserRole; children: ReactNode }) {
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, hasBackendTechnicianToken } = useAuth();
   const location = useLocation();
 
   if (!isAuthenticated || !user) {
@@ -30,13 +30,27 @@ export function RequireRole({ role, children }: { role: UserRole; children: Reac
     return <Navigate to={defaultPathByRole[user.role]} replace />;
   }
 
+  if (role === 'technician' && !hasBackendTechnicianToken) {
+    return (
+      <Navigate
+        to={loginPathForRole(role)}
+        replace
+        state={{ from: `${location.pathname}${location.search}` }}
+      />
+    );
+  }
+
   return <>{children}</>;
 }
 
 export function PublicOnly({ children }: { children: ReactNode }) {
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, hasBackendTechnicianToken } = useAuth();
 
   if (!isAuthenticated || !user) {
+    return <>{children}</>;
+  }
+
+  if (user.role === 'technician' && !hasBackendTechnicianToken) {
     return <>{children}</>;
   }
 
@@ -44,10 +58,14 @@ export function PublicOnly({ children }: { children: ReactNode }) {
 }
 
 export function HomeRoute() {
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, hasBackendTechnicianToken } = useAuth();
 
   if (!isAuthenticated || !user) {
     return <Navigate to="/admin/login" replace />;
+  }
+
+  if (user.role === 'technician' && !hasBackendTechnicianToken) {
+    return <Navigate to="/tech/login" replace />;
   }
 
   return <Navigate to={defaultPathByRole[user.role]} replace />;
